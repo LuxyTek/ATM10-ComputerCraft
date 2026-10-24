@@ -40,20 +40,13 @@ local function getMonitor()
         return peripheral.wrap(config.monitor), config.monitor
     end
 
-    local monitor, name
-    for _, peripheralName in ipairs(peripheral.getNames()) do
-        if peripheral.hasType(peripheralName, "monitor") then
-            monitor = peripheral.wrap(peripheralName)
-            name = peripheralName
-            break
+    for _, name in ipairs(peripheral.getNames()) do
+        if peripheral.hasType(name, "monitor") then
+            return peripheral.wrap(name), name
         end
     end
 
-    if not monitor then
-        error("Aucun monitor detecte sur le reseau CC:Tweaked")
-    end
-
-    return monitor, name
+    error("Aucun monitor detecte sur le reseau CC:Tweaked")
 end
 
 local monitor, monitorName = getMonitor()
@@ -92,7 +85,6 @@ local function isEnergyStorage(name)
         return true
     end
 
-    -- Mekanism exposes its own computer API on machines such as Energy Cubes.
     return hasMethod(name, "getEnergy")
         and (hasMethod(name, "getEnergyCapacity") or hasMethod(name, "getMaxEnergy"))
 end
@@ -123,9 +115,7 @@ local function readStorage(name)
     if not device then return nil end
 
     local okEnergy, energy = pcall(device.getEnergy)
-    if not okEnergy then
-        return nil
-    end
+    if not okEnergy then return nil end
 
     local okCapacity, capacity
     if device.getEnergyCapacity then
@@ -136,9 +126,7 @@ local function readStorage(name)
         return nil
     end
 
-    if not okCapacity then
-        return nil
-    end
+    if not okCapacity then return nil end
 
     return {
         name = name,
@@ -147,24 +135,64 @@ local function readStorage(name)
     }
 end
 
-local function safeWrite(x, y, text, fg, bg)
-    local width, height = monitor.getSize()
-    if y < 1 or y > height or x > width then return end
-
-    monitor.setCursorPos(math.max(1, x), y)
+local function setColors(fg, bg)
     if monitor.isColor() then
         if fg then monitor.setTextColor(fg) end
         if bg then monitor.setBackgroundColor(bg) end
     end
+end
 
-    local available = width - math.max(1, x) + 1
+local function writeAt(x, y, text, fg, bg)
+    local width, height = monitor.getSize()
+    if y < 1 or y > height or x > width then return end
+
+    x = math.max(1, x)
+    local available = width - x + 1
+    if available <= 0 then return end
+
+    setColors(fg, bg)
+    monitor.setCursorPos(x, y)
     monitor.write(string.sub(tostring(text), 1, available))
 end
 
-local function centered(y, text, fg)
+local function centered(y, text, fg, bg)
     local width = monitor.getSize()
     local x = math.max(1, math.floor((width - #text) / 2) + 1)
-    safeWrite(x, y, text, fg)
+    writeAt(x, y, text, fg, bg)
+end
+
+local function horizontalLine(y, char, fg)
+    local width = monitor.getSize()
+    writeAt(1, y, string.rep(char or "-", width), fg)
+end
+
+local function drawBar(y, ratio)
+    local width, height = monitor.getSize()
+    if y < 1 or y > height then return end
+
+    local x = 3
+    local barWidth = math.max(1, width - 4)
+    local filled = math.floor(barWidth * ratio + 0.5)
+    filled = math.max(0, math.min(barWidth, filled))
+
+    local barColor = colors.lime
+    if ratio <= config.lowThreshold then
+        barColor = colors.red
+    elseif ratio <= config.warningThreshold then
+        barColor = colors.orange
+    end
+
+    monitor.setCursorPos(x, y)
+
+    if monitor.isColor() then
+        monitor.setBackgroundColor(barColor)
+        monitor.write(string.rep(" ", filled))
+        monitor.setBackgroundColor(colors.gray)
+        monitor.write(string.rep(" ", barWidth - filled))
+        monitor.setBackgroundColor(colors.black)
+    else
+        monitor.write(string.rep("#", filled) .. string.rep("-", barWidth - filled))
+    end
 end
 
 local previousEnergy = nil
@@ -191,9 +219,11 @@ while true do
 
     local now = os.epoch("utc") / 1000
     local netPerTick = nil
+
     if previousEnergy and previousTime and now > previousTime then
         netPerTick = (totalEnergy - previousEnergy) / ((now - previousTime) * 20)
     end
+
     previousEnergy = totalEnergy
     previousTime = now
 
@@ -202,55 +232,83 @@ while true do
     monitor.clear()
 
     local width, height = monitor.getSize()
-    centered(1, config.title, colors.cyan)
 
-    safeWrite(2, 3, "Stocke : " .. formatEnergy(totalEnergy), colors.white)
-    safeWrite(2, 4, "Capacite : " .. formatEnergy(totalCapacity), colors.white)
-    safeWrite(2, 5, string.format("Charge : %.1f %%", fill * 100), colors.white)
+    -- Header
+    centered(1, config.title, colors.cyan)
+    horizontalLine(2, "=", colors.gray)
+
+    -- Main storage view
+    centered(4, string.format("%.1f %%", fill * 100), colors.white)
+    centered(5, formatEnergy(totalEnergy) .. " / " .. formatEnergy(totalCapacity), colors.lightGray)
+    drawBar(7, fill)
+
+    -- Network state
+    local stateText = "CALCUL..."
+    local stateColor = colors.lightGray
+    local deltaText = "Delta net : calcul..."
 
     if netPerTick then
-        local sign = netPerTick >= 0 and "+" or ""
-        local netColor = netPerTick >= 0 and colors.lime or colors.red
-        safeWrite(2, 6, "Delta net : " .. sign .. formatEnergy(netPerTick) .. "/t", netColor)
-    else
-        safeWrite(2, 6, "Delta net : calcul...", colors.lightGray)
-    end
-
-    local barWidth = math.max(1, width - 4)
-    local filled = math.floor(barWidth * fill + 0.5)
-    filled = math.max(0, math.min(barWidth, filled))
-
-    local barColor = colors.lime
-    if fill <= config.lowThreshold then
-        barColor = colors.red
-    elseif fill <= config.warningThreshold then
-        barColor = colors.orange
-    end
-
-    if monitor.isColor() then
-        monitor.setCursorPos(3, 8)
-        monitor.setBackgroundColor(barColor)
-        monitor.write(string.rep(" ", filled))
-        monitor.setBackgroundColor(colors.gray)
-        monitor.write(string.rep(" ", barWidth - filled))
-        monitor.setBackgroundColor(colors.black)
-    else
-        safeWrite(3, 8, string.rep("#", filled) .. string.rep("-", barWidth - filled))
-    end
-
-    safeWrite(2, 10, "Energy Cubes / stockages : " .. #storages, colors.lightGray)
-
-    if #storages == 0 then
-        safeWrite(2, 12, "Aucun stockage detecte", colors.red)
-        safeWrite(2, 13, "Tape: peripherals", colors.lightGray)
-    elseif config.showDevices and height >= 12 then
-        local row = 12
-        for index, storage in ipairs(storages) do
-            if row > height then break end
-            local pct = storage.capacity > 0 and (storage.energy / storage.capacity * 100) or 0
-            safeWrite(2, row, string.format("%02d  %6.1f%%  %s", index, pct, formatEnergy(storage.energy)), colors.white)
-            row = row + 1
+        local stableLimit = 1
+        if netPerTick > stableLimit then
+            stateText = "CHARGE"
+            stateColor = colors.lime
+        elseif netPerTick < -stableLimit then
+            stateText = "DECHARGE"
+            stateColor = colors.red
+        else
+            stateText = "STABLE"
+            stateColor = colors.yellow
         end
+
+        local sign = netPerTick > 0 and "+" or ""
+        deltaText = "Delta net : " .. sign .. formatEnergy(netPerTick) .. "/t"
+    end
+
+    centered(9, stateText, stateColor)
+    centered(10, deltaText, stateColor)
+
+    horizontalLine(12, "-", colors.gray)
+
+    -- Device table
+    if #storages == 0 then
+        centered(14, "AUCUN STOCKAGE DETECTE", colors.red)
+        centered(15, "Commande : peripherals", colors.lightGray)
+    elseif config.showDevices then
+        writeAt(2, 13, "CUBE", colors.cyan)
+        writeAt(math.max(10, math.floor(width * 0.30)), 13, "CHARGE", colors.cyan)
+        writeAt(math.max(22, math.floor(width * 0.52)), 13, "ENERGIE", colors.cyan)
+
+        local firstRow = 14
+        local footerRow = height
+        local maxRows = math.max(0, footerRow - firstRow - 1)
+
+        for index, storage in ipairs(storages) do
+            if index > maxRows then break end
+
+            local row = firstRow + index - 1
+            local pct = storage.capacity > 0 and (storage.energy / storage.capacity * 100) or 0
+            local rowColor = colors.white
+
+            if pct <= config.lowThreshold * 100 then
+                rowColor = colors.red
+            elseif pct <= config.warningThreshold * 100 then
+                rowColor = colors.orange
+            end
+
+            writeAt(2, row, string.format("CUBE %02d", index), rowColor)
+            writeAt(math.max(10, math.floor(width * 0.30)), row, string.format("%5.1f %%", pct), rowColor)
+            writeAt(math.max(22, math.floor(width * 0.52)), row, formatEnergy(storage.energy), rowColor)
+        end
+    end
+
+    -- Footer
+    if height >= 3 then
+        horizontalLine(height - 1, "-", colors.gray)
+        local footer = string.format("%d stockage%s  |  refresh %.1fs",
+            #storages,
+            #storages > 1 and "s" or "",
+            config.refreshSeconds)
+        centered(height, footer, colors.lightGray)
     end
 
     sleep(config.refreshSeconds)
