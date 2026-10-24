@@ -73,18 +73,42 @@ local function formatEnergy(value)
     return string.format("%.0f FE", value)
 end
 
+local function hasMethod(name, wanted)
+    local methods = peripheral.getMethods(name) or {}
+    for _, method in ipairs(methods) do
+        if method == wanted then
+            return true
+        end
+    end
+    return false
+end
+
+local function isEnergyStorage(name)
+    if not peripheral.isPresent(name) then
+        return false
+    end
+
+    if peripheral.hasType(name, "energy_storage") then
+        return true
+    end
+
+    -- Mekanism exposes its own computer API on machines such as Energy Cubes.
+    return hasMethod(name, "getEnergy")
+        and (hasMethod(name, "getEnergyCapacity") or hasMethod(name, "getMaxEnergy"))
+end
+
 local function discoverStorages()
     local names = {}
 
     if #config.devices > 0 then
         for _, name in ipairs(config.devices) do
-            if peripheral.isPresent(name) and peripheral.hasType(name, "energy_storage") then
+            if isEnergyStorage(name) then
                 table.insert(names, name)
             end
         end
     else
         for _, name in ipairs(peripheral.getNames()) do
-            if name ~= monitorName and peripheral.hasType(name, "energy_storage") then
+            if name ~= monitorName and isEnergyStorage(name) then
                 table.insert(names, name)
             end
         end
@@ -99,9 +123,20 @@ local function readStorage(name)
     if not device then return nil end
 
     local okEnergy, energy = pcall(device.getEnergy)
-    local okCapacity, capacity = pcall(device.getEnergyCapacity)
+    if not okEnergy then
+        return nil
+    end
 
-    if not okEnergy or not okCapacity then
+    local okCapacity, capacity
+    if device.getEnergyCapacity then
+        okCapacity, capacity = pcall(device.getEnergyCapacity)
+    elseif device.getMaxEnergy then
+        okCapacity, capacity = pcall(device.getMaxEnergy)
+    else
+        return nil
+    end
+
+    if not okCapacity then
         return nil
     end
 
@@ -205,7 +240,10 @@ while true do
 
     safeWrite(2, 10, "Energy Cubes / stockages : " .. #storages, colors.lightGray)
 
-    if config.showDevices and height >= 12 then
+    if #storages == 0 then
+        safeWrite(2, 12, "Aucun stockage detecte", colors.red)
+        safeWrite(2, 13, "Tape: peripherals", colors.lightGray)
+    elseif config.showDevices and height >= 12 then
         local row = 12
         for index, storage in ipairs(storages) do
             if row > height then break end
