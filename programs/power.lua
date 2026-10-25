@@ -9,6 +9,7 @@ local defaults = {
     showDevices = true,
     lowThreshold = 0.25,
     warningThreshold = 0.60,
+    trendSeconds = 30,
 }
 
 local function loadConfig()
@@ -64,6 +65,30 @@ local function formatEnergy(value)
         return string.format("%.2f kFE", value / 1e3)
     end
     return string.format("%.0f FE", value)
+end
+
+local function formatDuration(seconds)
+    if not seconds or seconds < 0 or seconds == math.huge then
+        return "--"
+    end
+
+    seconds = math.floor(seconds + 0.5)
+
+    if seconds < 60 then
+        return string.format("%ds", seconds)
+    end
+
+    local minutes = math.floor(seconds / 60)
+    local hours = math.floor(minutes / 60)
+    local days = math.floor(hours / 24)
+
+    if days > 0 then
+        return string.format("%dj %02dh", days, hours % 24)
+    elseif hours > 0 then
+        return string.format("%dh %02dmin", hours, minutes % 60)
+    end
+
+    return string.format("%dmin %02ds", minutes, seconds % 60)
 end
 
 local function hasMethod(name, wanted)
@@ -142,12 +167,13 @@ local function setColors(fg, bg)
     end
 end
 
-local function writeAt(x, y, text, fg, bg)
+local function writeAt(x, y, text, fg, bg, rightLimit)
     local width, height = monitor.getSize()
     if y < 1 or y > height or x > width then return end
 
     x = math.max(1, x)
-    local available = width - x + 1
+    local limit = math.min(width, rightLimit or width)
+    local available = limit - x + 1
     if available <= 0 then return end
 
     setColors(fg, bg)
@@ -180,7 +206,6 @@ local function drawVerticalGauge(x, topY, bottomY, gaugeWidth, ratio)
         barColor = colors.orange
     end
 
-    -- Cadre / fond de jauge.
     for row = 0, height - 1 do
         local y = topY + row
         local fromBottom = height - row
@@ -195,7 +220,6 @@ local function drawVerticalGauge(x, topY, bottomY, gaugeWidth, ratio)
         end
     end
 
-    -- Pourcentage global au centre de la jauge.
     local percentText = string.format("%.1f%%", ratio * 100)
     local percentY = math.floor((topY + bottomY) / 2)
     local percentX = x + math.max(0, math.floor((gaugeWidth - #percentText) / 2))
@@ -221,8 +245,66 @@ local function drawVerticalGauge(x, topY, bottomY, gaugeWidth, ratio)
     end
 end
 
+local function drawMiniBar(x, y, barWidth, ratio, rightLimit)
+    if barWidth <= 0 then return end
+
+    local maxWidth = (rightLimit or select(1, monitor.getSize())) - x + 1
+    barWidth = math.max(1, math.min(barWidth, maxWidth))
+
+    local filled = math.floor(barWidth * ratio + 0.5)
+    filled = math.max(0, math.min(barWidth, filled))
+
+    local barColor = colors.lime
+    if ratio <= config.lowThreshold then
+        barColor = colors.red
+    elseif ratio <= config.warningThreshold then
+        barColor = colors.orange
+    end
+
+    monitor.setCursorPos(x, y)
+
+    if monitor.isColor() then
+        monitor.setBackgroundColor(barColor)
+        monitor.write(string.rep(" ", filled))
+        monitor.setBackgroundColor(colors.gray)
+        monitor.write(string.rep(" ", barWidth - filled))
+        monitor.setBackgroundColor(colors.black)
+        monitor.setTextColor(colors.white)
+    else
+        monitor.write(string.rep("#", filled) .. string.rep("-", barWidth - filled))
+    end
+end
+
+local sessionStart = os.epoch("utc") / 1000
 local previousEnergy = nil
 local previousTime = nil
+local deltaSamples = {}
+local peakConsumption = 0
+
+local function updateTrend(now, netPerTick)
+    if netPerTick then
+        table.insert(deltaSamples, { time = now, value = netPerTick })
+        if netPerTick < peakConsumption then
+            peakConsumption = netPerTick
+        end
+    end
+
+    local cutoff = now - config.trendSeconds
+    while #deltaSamples > 0 and deltaSamples[1].time < cutoff do
+        table.remove(deltaSamples, 1)
+    end
+
+    if #deltaSamples == 0 then
+        return nil
+    end
+
+    local total = 0
+    for _, sample in ipairs(deltaSamples) do
+        total = total + sample.value
+    end
+
+    return total / #deltaSamples
+end
 
 while true do
     local storages = {}
@@ -253,95 +335,120 @@ while true do
     previousEnergy = totalEnergy
     previousTime = now
 
+    local averageNet = updateTrend(now, netPerTick)
+
     monitor.setBackgroundColor(colors.black)
     monitor.setTextColor(colors.white)
     monitor.clear()
 
     local width, height = monitor.getSize()
 
-    -- Header
     centered(1, config.title, colors.cyan)
     horizontalLine(2, "=", colors.gray)
 
-    -- Main storage view
-    centered(4, string.format("%.1f %%", fill * 100), colors.white)
-    centered(5, formatEnergy(totalEnergy) .. " / " .. formatEnergy(totalCapacity), colors.lightGray)
+    centered(4, formatEnergy(totalEnergy) .. " / " .. formatEnergy(totalCapacity), colors.white)
 
-    -- Network state
     local stateText = "CALCUL..."
     local stateColor = colors.lightGray
-    local deltaText = "Delta net : calcul..."
+    local trendText = "Moy " .. config.trendSeconds .. "s : calcul..."
+    local etaText = "Estimation : calcul..."
 
-    if netPerTick then
+    if averageNet then
         local stableLimit = 1
-        if netPerTick > stableLimit then
+
+        if averageNet > stableLimit then
             stateText = "CHARGE"
             stateColor = colors.lime
-        elseif netPerTick < -stableLimit then
+            local remaining = math.max(0, totalCapacity - totalEnergy)
+            local secondsToFull = remaining / (averageNet * 20)
+            etaText = "Plein dans : " .. formatDuration(secondsToFull)
+        elseif averageNet < -stableLimit then
             stateText = "DECHARGE"
             stateColor = colors.red
+            local secondsRemaining = totalEnergy / ((-averageNet) * 20)
+            etaText = "Autonomie : " .. formatDuration(secondsRemaining)
         else
             stateText = "STABLE"
             stateColor = colors.yellow
+            etaText = "Estimation : stable"
         end
 
-        local sign = netPerTick > 0 and "+" or ""
-        deltaText = "Delta net : " .. sign .. formatEnergy(netPerTick) .. "/t"
+        local sign = averageNet > 0 and "+" or ""
+        trendText = "Moy " .. config.trendSeconds .. "s : " .. sign .. formatEnergy(averageNet) .. "/t"
     end
 
-    centered(9, stateText, stateColor)
-    centered(10, deltaText, stateColor)
+    centered(6, stateText, stateColor)
+    centered(7, trendText, stateColor)
+    centered(8, etaText, colors.lightGray)
 
-    horizontalLine(12, "-", colors.gray)
+    horizontalLine(10, "-", colors.gray)
 
-    -- Device table + vertical energy gauge.
     local gaugeWidth = math.max(7, math.min(10, math.floor(width * 0.14)))
     local gaugeX = width - gaugeWidth - 1
-    local gaugeTop = 13
-    local gaugeBottom = math.max(gaugeTop, height - 2)
+    local gaugeTop = 12
+    local gaugeBottom = math.max(gaugeTop, height - 3)
     local contentRight = gaugeX - 2
 
-    writeAt(gaugeX, 12, "ENERGIE", colors.cyan)
+    writeAt(gaugeX, 11, "ENERGIE", colors.cyan)
 
     if #storages == 0 then
-        writeAt(2, 14, "AUCUN STOCKAGE DETECTE", colors.red)
-        writeAt(2, 15, "Commande : peripherals", colors.lightGray)
+        writeAt(2, 12, "AUCUN STOCKAGE DETECTE", colors.red, nil, contentRight)
+        writeAt(2, 13, "Commande : peripherals", colors.lightGray, nil, contentRight)
     elseif config.showDevices then
-        local chargeX = math.max(11, math.floor(contentRight * 0.30))
-        local energyX = math.max(chargeX + 11, math.floor(contentRight * 0.56))
+        local labelX = 2
+        local barX = 11
+        local miniBarWidth = math.max(8, math.min(14, math.floor(contentRight * 0.22)))
+        local percentX = barX + miniBarWidth + 2
+        local energyX = percentX + 8
 
-        writeAt(2, 13, "CUBE", colors.cyan)
-        writeAt(chargeX, 13, "CHARGE", colors.cyan)
-        writeAt(energyX, 13, "ENERGIE", colors.cyan)
+        writeAt(labelX, 11, "CUBE", colors.cyan, nil, contentRight)
+        writeAt(barX, 11, "NIVEAU", colors.cyan, nil, contentRight)
+        writeAt(percentX, 11, "%", colors.cyan, nil, contentRight)
+        writeAt(energyX, 11, "ENERGIE", colors.cyan, nil, contentRight)
 
-        local firstRow = 14
+        local firstRow = 12
         local maxRows = math.max(0, gaugeBottom - firstRow + 1)
 
         for index, storage in ipairs(storages) do
             if index > maxRows then break end
 
             local row = firstRow + index - 1
-            local pct = storage.capacity > 0 and (storage.energy / storage.capacity * 100) or 0
-            local rowColor = colors.white
+            local ratio = storage.capacity > 0 and (storage.energy / storage.capacity) or 0
+            ratio = math.max(0, math.min(1, ratio))
+            local pct = ratio * 100
 
-            if pct <= config.lowThreshold * 100 then
+            local rowColor = colors.white
+            if ratio <= config.lowThreshold then
                 rowColor = colors.red
-            elseif pct <= config.warningThreshold * 100 then
+            elseif ratio <= config.warningThreshold then
                 rowColor = colors.orange
             end
 
-            writeAt(2, row, string.format("CUBE %02d", index), rowColor)
-            writeAt(chargeX, row, string.format("%5.1f %%", pct), rowColor)
-            writeAt(energyX, row, formatEnergy(storage.energy), rowColor)
+            writeAt(labelX, row, string.format("%02d", index), rowColor, nil, contentRight)
+            drawMiniBar(barX, row, miniBarWidth, ratio, contentRight)
+            writeAt(percentX, row, string.format("%5.1f", pct), rowColor, nil, contentRight)
+            writeAt(energyX, row, formatEnergy(storage.energy), rowColor, nil, contentRight)
         end
     end
 
     drawVerticalGauge(gaugeX, gaugeTop, gaugeBottom, gaugeWidth, fill)
 
-    -- Footer
-    if height >= 3 then
-        horizontalLine(height - 1, "-", colors.gray)
-        local footer = string.format("%d stockage%s  |  refresh %.1fs",
+    if height >= 4 then
+        horizontalLine(height - 2, "-", colors.gray)
+
+        local peakText = "Pic conso : "
+        if peakConsumption < 0 then
+            peakText = peakText .. formatEnergy(peakConsumption) .. "/t"
+        else
+            peakText = peakText .. "--"
+        end
+
+        local uptimeText = "Uptime : " .. formatDuration(now - sessionStart)
+
+        writeAt(2, height - 1, peakText, colors.lightGray)
+        writeAt(math.max(2, width - #uptimeText), height - 1, uptimeText, colors.lightGray)
+
+        local footer = string.format("%d stockage%s | refresh %.1fs",
             #storages,
             #storages > 1 and "s" or "",
             config.refreshSeconds)
