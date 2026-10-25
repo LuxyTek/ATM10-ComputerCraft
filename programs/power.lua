@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "6.2"
+local PROGRAM_VERSION = "6.3"
 local CONFIG_PATH = "/config/power.lua"
 local UPDATE_URL = "https://raw.githubusercontent.com/LuxyTek/ATM10-ComputerCraft/main/programs/power.lua"
 local UPDATE_TEMP = "/programs/power.new"
@@ -339,6 +339,55 @@ local function drawVerticalGauge(x, topY, bottomY, gaugeWidth, ratio)
         monitor.setTextColor(colors.white)
     end
 end
+
+local function drawVerticalUsageGauge(x, topY, bottomY, gaugeWidth, ratio)
+    local height = bottomY - topY + 1
+    if height <= 0 or gaugeWidth <= 0 then return end
+
+    ratio = math.max(0, math.min(1, ratio or 0))
+    local filledRows = math.floor(height * ratio + 0.5)
+
+    local barColor = colors.lime
+    if ratio >= 0.90 then
+        barColor = colors.red
+    elseif ratio >= 0.75 then
+        barColor = colors.orange
+    end
+
+    for row = 0, height - 1 do
+        local y = topY + row
+        local fromBottom = height - row
+        local isFilled = fromBottom <= filledRows
+
+        monitor.setCursorPos(x, y)
+        if monitor.isColor() then
+            monitor.setBackgroundColor(isFilled and barColor or colors.gray)
+            monitor.write(string.rep(" ", gaugeWidth))
+        else
+            monitor.write(string.rep(isFilled and "#" or ".", gaugeWidth))
+        end
+    end
+
+    local percentText = string.format("%.1f%%", ratio * 100)
+    local percentY = math.floor((topY + bottomY) / 2)
+    local percentX = x + math.max(0, math.floor((gaugeWidth - #percentText) / 2))
+
+    if monitor.isColor() then
+        local rowsFromBottom = bottomY - percentY + 1
+        local percentOnFilled = rowsFromBottom <= filledRows
+        monitor.setBackgroundColor(percentOnFilled and barColor or colors.gray)
+        monitor.setTextColor(percentOnFilled and barColor ~= colors.red and colors.black or colors.white)
+    end
+
+    monitor.setCursorPos(percentX, percentY)
+    monitor.write(percentText)
+
+    if monitor.isColor() then
+        monitor.setBackgroundColor(colors.black)
+        monitor.setTextColor(colors.white)
+    end
+end
+
 
 local function hasMethod(name, wanted)
     local methods = peripheral.getMethods(name) or {}
@@ -1122,13 +1171,12 @@ local function renderDashboardPage(now, width, height)
     if powerReady then
         writeAt(ex, topY1 + 3,
             formatEnergy(power.totalEnergy) .. " / " .. formatEnergy(power.totalCapacity),
-            colors.white, colors.black, er)
+            colors.white, colors.black, textRight)
 
-        local ebar = math.max(12, math.min(26, er - ex - 10))
-        drawMiniBar(ex, topY1 + 5, ebar, powerFill, er)
-        writeAt(ex + ebar + 2, topY1 + 5,
-            string.format("%5.1f%%", powerFill * 100),
-            energyStatus, colors.black, er)
+        local gaugeWidth = 8
+        local gaugeX = leftX2 - gaugeWidth - 2
+        local textRight = gaugeX - 2
+        drawVerticalGauge(gaugeX, topY1 + 3, topY2 - 2, gaugeWidth, powerFill)
 
         local state = "STABLE"
         local stateColor = colors.yellow
@@ -1142,8 +1190,8 @@ local function renderDashboardPage(now, width, height)
             end
         end
 
-        writeAt(ex, topY1 + 7, "Etat : " .. state, stateColor, colors.black, er)
-        writeAt(ex, topY1 + 9, "Cubes : " .. tostring(#(power.storages or {})), colors.lightGray, colors.black, er)
+        writeAt(ex, topY1 + 7, "Etat : " .. state, stateColor, colors.black, textRight)
+        writeAt(ex, topY1 + 9, "Cubes : " .. tostring(#(power.storages or {})), colors.lightGray, colors.black, textRight)
     else
         writeAt(ex, topY1 + 4, "Donnees indisponibles", colors.gray, colors.black, er)
     end
@@ -1159,41 +1207,33 @@ local function renderDashboardPage(now, width, height)
     if meReady then
         writeAt(mx, topY1 + 3,
             "Reseau : " .. (me.online and "ONLINE" or "OFFLINE"),
-            me.online and colors.lime or colors.red, colors.black, mr)
+            me.online and colors.lime or colors.red, colors.black, textRight)
+
+        local gaugeWidth = 8
+        local gaugeX = rightX2 - gaugeWidth - 2
+        local textRight = gaugeX - 2
 
         if storageRatioValue then
-            local mbar = math.max(12, math.min(26, mr - mx - 10))
-            drawUsageBar(mx, topY1 + 5, mbar, storageRatioValue, mr)
-
-            local storageColor = colors.lime
-            if storageRatioValue >= 0.90 then
-                storageColor = colors.red
-            elseif storageRatioValue >= 0.75 then
-                storageColor = colors.orange
-            end
-
-            writeAt(mx + mbar + 2, topY1 + 5,
-                string.format("%5.1f%%", storageRatioValue * 100),
-                storageColor, colors.black, mr)
+            drawVerticalUsageGauge(gaugeX, topY1 + 3, topY2 - 2, gaugeWidth, storageRatioValue)
 
             writeAt(mx, topY1 + 7,
                 "Libre : " .. formatBytes(storageFree) .. " / " .. formatBytes(me.maxItemStorage),
-                colors.lime, colors.black, mr)
+                colors.lime, colors.black, textRight)
         else
-            writeAt(mx, topY1 + 5, "Stockage indisponible", colors.gray, colors.black, mr)
+            writeAt(mx, topY1 + 5, "Stockage indisponible", colors.gray, colors.black, textRight)
         end
 
         writeAt(mx, topY1 + 9,
             string.format("Drives : %d   Cells : %d", me.driveCount or 0, me.cellCount or 0),
-            colors.lightGray, colors.black, mr)
+            colors.lightGray, colors.black, textRight)
 
         writeAt(mx, topY1 + 10,
             "AE : " .. formatAE(me.storedEnergy) .. " / " .. formatAE(me.energyCapacity),
-            colors.lightGray, colors.black, mr)
+            colors.lightGray, colors.black, textRight)
 
         writeAt(mx, topY1 + 11,
             string.format("Items : %d   Crafts : %d", me.itemTypes or 0, me.taskCount or 0),
-            colors.lightGray, colors.black, mr)
+            colors.lightGray, colors.black, textRight)
     else
         writeAt(mx, topY1 + 4, "ME Bridge indisponible", colors.gray, colors.black, mr)
     end
