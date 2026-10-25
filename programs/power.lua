@@ -383,7 +383,7 @@ local function doUpdate()
         timeout = 10,
     })
 
-    if queued == false then
+    if not queued then
         failUpdate("HTTP REFUSE")
         return false, requestError
     end
