@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "6.1"
+local PROGRAM_VERSION = "6.2"
 local CONFIG_PATH = "/config/power.lua"
 local UPDATE_URL = "https://raw.githubusercontent.com/LuxyTek/ATM10-ComputerCraft/main/programs/power.lua"
 local UPDATE_TEMP = "/programs/power.new"
@@ -176,6 +176,31 @@ local function fillRect(x1, y1, x2, y2, bg)
         monitor.setTextColor(colors.white)
     end
 end
+
+local function drawBox(x1, y1, x2, y2, borderColor)
+    if x2 <= x1 or y2 <= y1 then return end
+
+    local horizontal = string.rep("-", math.max(0, x2 - x1 - 1))
+    writeAt(x1 + 1, y1, horizontal, borderColor, colors.black, x2 - 1)
+    writeAt(x1 + 1, y2, horizontal, borderColor, colors.black, x2 - 1)
+
+    for y = y1 + 1, y2 - 1 do
+        writeAt(x1, y, "|", borderColor, colors.black, x1)
+        writeAt(x2, y, "|", borderColor, colors.black, x2)
+    end
+
+    writeAt(x1, y1, "+", borderColor, colors.black, x1)
+    writeAt(x2, y1, "+", borderColor, colors.black, x2)
+    writeAt(x1, y2, "+", borderColor, colors.black, x1)
+    writeAt(x2, y2, "+", borderColor, colors.black, x2)
+end
+
+local function drawStatusLight(x, y, color)
+    writeAt(x, y, "[", colors.lightGray, colors.black, x)
+    writeAt(x + 1, y, "O", color, colors.black, x + 1)
+    writeAt(x + 2, y, "]", colors.lightGray, colors.black, x + 2)
+end
+
 
 local function cardTextColor(bg)
     if bg == colors.red or bg == colors.gray or bg == colors.black then
@@ -1048,9 +1073,32 @@ local function renderDashboardPage(now, width, height)
         table.insert(warnings, tostring(me.cellAlerts) .. " CELL(S) >90%")
     end
 
+    local energyStatus = colors.gray
+    if powerReady then
+        if powerFill <= config.lowThreshold then
+            energyStatus = colors.red
+        elseif powerFill <= config.warningThreshold then
+            energyStatus = colors.orange
+        else
+            energyStatus = colors.lime
+        end
+    end
+
+    local meStatus = colors.gray
+    if meReady then
+        if not me.online or (storageRatioValue and storageRatioValue >= 0.95) then
+            meStatus = colors.red
+        elseif (storageRatioValue and storageRatioValue >= 0.75) or (me.cellAlerts or 0) > 0 then
+            meStatus = colors.orange
+        else
+            meStatus = colors.lime
+        end
+    end
+
+    local alertStatus = #warnings == 0 and colors.lime or (critical and colors.red or colors.orange)
+
     local overallText = #warnings == 0 and "SYSTEME OK" or (critical and "CRITIQUE" or "ATTENTION")
-    local overallColor = #warnings == 0 and colors.lime or (critical and colors.red or colors.orange)
-    centered(3, overallText, overallColor)
+    centered(3, overallText, alertStatus)
 
     local gap = 3
     local leftX1 = 2
@@ -1063,136 +1111,118 @@ local function renderDashboardPage(now, width, height)
     local alertY1 = topY2 + 2
     local alertY2 = height - 4
 
-    -- Card Energie
-    local energyBg = colors.gray
-    if powerReady then
-        if powerFill <= config.lowThreshold then
-            energyBg = colors.red
-        elseif powerFill <= config.warningThreshold then
-            energyBg = colors.orange
-        else
-            energyBg = colors.green
-        end
-    end
+    -- Carte Energie
+    drawBox(leftX1, topY1, leftX2, topY2, colors.gray)
+    drawStatusLight(leftX1 + 2, topY1 + 1, energyStatus)
+    writeAt(leftX1 + 6, topY1 + 1, "ENERGIE", colors.cyan, colors.black, leftX2 - 2)
 
-    fillRect(leftX1, topY1, leftX2, topY2, energyBg)
-    local energyFg = cardTextColor(energyBg)
     local ex = leftX1 + 2
     local er = leftX2 - 2
-
-    writeAt(ex, topY1 + 1, "ENERGIE", energyFg, energyBg, er)
 
     if powerReady then
         writeAt(ex, topY1 + 3,
             formatEnergy(power.totalEnergy) .. " / " .. formatEnergy(power.totalCapacity),
-            energyFg, energyBg, er)
+            colors.white, colors.black, er)
 
         local ebar = math.max(12, math.min(26, er - ex - 10))
-        drawCardBar(ex, topY1 + 5, ebar, powerFill, energyBg, er)
+        drawMiniBar(ex, topY1 + 5, ebar, powerFill, er)
         writeAt(ex + ebar + 2, topY1 + 5,
             string.format("%5.1f%%", powerFill * 100),
-            energyFg, energyBg, er)
+            energyStatus, colors.black, er)
 
         local state = "STABLE"
+        local stateColor = colors.yellow
         if power.averageNet then
             if power.averageNet > 1 then
                 state = "CHARGE +" .. formatEnergy(power.averageNet) .. "/t"
+                stateColor = colors.lime
             elseif power.averageNet < -1 then
                 state = "DECHARGE " .. formatEnergy(power.averageNet) .. "/t"
+                stateColor = colors.red
             end
         end
 
-        writeAt(ex, topY1 + 7, "Etat : " .. state, energyFg, energyBg, er)
-        writeAt(ex, topY1 + 9, "Cubes : " .. tostring(#(power.storages or {})), energyFg, energyBg, er)
+        writeAt(ex, topY1 + 7, "Etat : " .. state, stateColor, colors.black, er)
+        writeAt(ex, topY1 + 9, "Cubes : " .. tostring(#(power.storages or {})), colors.lightGray, colors.black, er)
     else
-        writeAt(ex, topY1 + 4, "Donnees indisponibles", energyFg, energyBg, er)
+        writeAt(ex, topY1 + 4, "Donnees indisponibles", colors.gray, colors.black, er)
     end
 
-    -- Card ME / AE2
-    local meBg = colors.gray
-    if meReady then
-        if not me.online then
-            meBg = colors.red
-        elseif storageRatioValue and storageRatioValue >= 0.90 then
-            meBg = colors.red
-        elseif (storageRatioValue and storageRatioValue >= 0.75) or (me.cellAlerts or 0) > 0 then
-            meBg = colors.orange
-        else
-            meBg = colors.green
-        end
-    end
+    -- Carte ME / AE2
+    drawBox(rightX1, topY1, rightX2, topY2, colors.gray)
+    drawStatusLight(rightX1 + 2, topY1 + 1, meStatus)
+    writeAt(rightX1 + 6, topY1 + 1, "ME / AE2", colors.cyan, colors.black, rightX2 - 2)
 
-    fillRect(rightX1, topY1, rightX2, topY2, meBg)
-    local meFg = cardTextColor(meBg)
     local mx = rightX1 + 2
     local mr = rightX2 - 2
 
-    writeAt(mx, topY1 + 1, "ME / AE2", meFg, meBg, mr)
-
     if meReady then
-        writeAt(mx, topY1 + 3, "Reseau : " .. (me.online and "ONLINE" or "OFFLINE"), meFg, meBg, mr)
+        writeAt(mx, topY1 + 3,
+            "Reseau : " .. (me.online and "ONLINE" or "OFFLINE"),
+            me.online and colors.lime or colors.red, colors.black, mr)
 
         if storageRatioValue then
             local mbar = math.max(12, math.min(26, mr - mx - 10))
-            drawCardBar(mx, topY1 + 5, mbar, storageRatioValue, meBg, mr)
+            drawUsageBar(mx, topY1 + 5, mbar, storageRatioValue, mr)
+
+            local storageColor = colors.lime
+            if storageRatioValue >= 0.90 then
+                storageColor = colors.red
+            elseif storageRatioValue >= 0.75 then
+                storageColor = colors.orange
+            end
+
             writeAt(mx + mbar + 2, topY1 + 5,
                 string.format("%5.1f%%", storageRatioValue * 100),
-                meFg, meBg, mr)
+                storageColor, colors.black, mr)
 
             writeAt(mx, topY1 + 7,
                 "Libre : " .. formatBytes(storageFree) .. " / " .. formatBytes(me.maxItemStorage),
-                meFg, meBg, mr)
+                colors.lime, colors.black, mr)
         else
-            writeAt(mx, topY1 + 5, "Stockage indisponible", meFg, meBg, mr)
+            writeAt(mx, topY1 + 5, "Stockage indisponible", colors.gray, colors.black, mr)
         end
 
         writeAt(mx, topY1 + 9,
             string.format("Drives : %d   Cells : %d", me.driveCount or 0, me.cellCount or 0),
-            meFg, meBg, mr)
+            colors.lightGray, colors.black, mr)
 
         writeAt(mx, topY1 + 10,
             "AE : " .. formatAE(me.storedEnergy) .. " / " .. formatAE(me.energyCapacity),
-            meFg, meBg, mr)
+            colors.lightGray, colors.black, mr)
 
         writeAt(mx, topY1 + 11,
             string.format("Items : %d   Crafts : %d", me.itemTypes or 0, me.taskCount or 0),
-            meFg, meBg, mr)
+            colors.lightGray, colors.black, mr)
     else
-        writeAt(mx, topY1 + 4, "ME Bridge indisponible", meFg, meBg, mr)
+        writeAt(mx, topY1 + 4, "ME Bridge indisponible", colors.gray, colors.black, mr)
     end
 
-    -- Card Alertes
-    local alertBg
-    if #warnings == 0 then
-        alertBg = colors.green
-    elseif critical then
-        alertBg = colors.red
-    else
-        alertBg = colors.orange
-    end
-
-    fillRect(2, alertY1, width - 1, alertY2, alertBg)
-    local alertFg = cardTextColor(alertBg)
-
-    writeAt(4, alertY1 + 1,
+    -- Carte Alertes
+    drawBox(2, alertY1, width - 1, alertY2, colors.gray)
+    drawStatusLight(4, alertY1 + 1, alertStatus)
+    writeAt(8, alertY1 + 1,
         #warnings == 0 and "ALERTES - AUCUNE" or ("ALERTES - " .. tostring(#warnings)),
-        alertFg, alertBg, width - 3)
+        colors.cyan, colors.black, width - 3)
 
     if #warnings == 0 then
-        writeAt(4, alertY1 + 3, "Tous les systemes supervises sont dans une zone normale.",
-            alertFg, alertBg, width - 3)
+        writeAt(4, alertY1 + 3,
+            "Tous les systemes supervises sont dans une zone normale.",
+            colors.lime, colors.black, width - 3)
 
         if meReady then
             writeAt(4, alertY1 + 5,
                 string.format("Cells >90%% : %d   |   CPU busy : %d/%d",
                     me.cellAlerts or 0, me.busyCpuCount or 0, me.cpuCount or 0),
-                alertFg, alertBg, width - 3)
+                colors.lightGray, colors.black, width - 3)
         end
     else
         local maxAlerts = math.max(1, alertY2 - alertY1 - 2)
         for index = 1, math.min(#warnings, maxAlerts) do
-            writeAt(4, alertY1 + 1 + index, "! " .. warnings[index],
-                alertFg, alertBg, width - 3)
+            writeAt(4, alertY1 + 1 + index,
+                "! " .. warnings[index],
+                critical and colors.red or colors.orange,
+                colors.black, width - 3)
         end
     end
 
