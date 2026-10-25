@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "5.7"
+local PROGRAM_VERSION = "5.8"
 local CONFIG_PATH = "/config/power.lua"
 local UPDATE_URL = "https://raw.githubusercontent.com/LuxyTek/ATM10-ComputerCraft/main/programs/power.lua"
 local UPDATE_TEMP = "/programs/power.new"
@@ -483,7 +483,6 @@ end
 local function cellCapacityLabel(capacity)
     local known = {
         [4096] = "4K",
-        [8192] = "8K",
         [16384] = "16K",
         [65536] = "64K",
         [262144] = "256K",
@@ -501,7 +500,7 @@ local function cellCapacityLabel(capacity)
 end
 
 local function groupCellsByCapacity(cells)
-    local standardOrder = { 4096, 8192, 16384, 65536, 262144 }
+    local standardOrder = { 4096, 16384, 65536, 262144 }
     local groupsByCapacity = {}
 
     for _, capacity in ipairs(standardOrder) do
@@ -1230,7 +1229,6 @@ local function renderMEPage(now, width, height)
 
         local capacities = {
             { value = 4096, label = "CELL 4K" },
-            { value = 8192, label = "CELL 8K" },
             { value = 16384, label = "CELL 16K" },
             { value = 65536, label = "CELL 64K" },
             { value = 262144, label = "CELL 256K" },
