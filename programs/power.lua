@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "5.6"
+local PROGRAM_VERSION = "5.7"
 local CONFIG_PATH = "/config/power.lua"
 local UPDATE_URL = "https://raw.githubusercontent.com/LuxyTek/ATM10-ComputerCraft/main/programs/power.lua"
 local UPDATE_TEMP = "/programs/power.new"
@@ -1228,26 +1228,53 @@ local function renderMEPage(now, width, height)
         horizontalLine(detailTop - 1, "-", colors.gray)
         writeAt(2, detailTop, "DETAIL DES CELLS", colors.cyan)
 
-        local detailCells = cellsForDisplay(me.cells or {})
-        local firstDetailRow = detailTop + 1
+        local capacities = {
+            { value = 4096, label = "CELL 4K" },
+            { value = 8192, label = "CELL 8K" },
+            { value = 16384, label = "CELL 16K" },
+            { value = 65536, label = "CELL 64K" },
+            { value = 262144, label = "CELL 256K" },
+        }
+
+        local grouped = {}
+        for _, info in ipairs(capacities) do
+            grouped[info.value] = {}
+        end
+
+        local extras = {}
+        for _, cell in ipairs(me.cells or {}) do
+            if grouped[cell.capacity] then
+                table.insert(grouped[cell.capacity], cell)
+            else
+                table.insert(extras, cell)
+            end
+        end
+
+        for _, info in ipairs(capacities) do
+            table.sort(grouped[info.value], function(a, b)
+                return (a.ratio or -1) > (b.ratio or -1)
+            end)
+        end
+
+        local columnCount = #capacities
+        local usableWidth = width - 2
+        local columnWidth = math.max(12, math.floor(usableWidth / columnCount))
+        local headerY = detailTop + 1
+        local firstDetailRow = detailTop + 2
         local detailRows = math.max(0, contentBottom - firstDetailRow + 1)
 
-        if #detailCells == 0 or detailRows == 0 then
-            writeAt(2, firstDetailRow, "Aucune cell lisible", colors.gray)
-        else
-            local entryWidth = 18
-            local columns = math.max(1, math.floor((width - 3) / entryWidth))
-            local rowsNeeded = math.ceil(#detailCells / columns)
-            local visibleRows = math.min(detailRows, rowsNeeded)
-            local maxVisible = visibleRows * columns
+        for column, info in ipairs(capacities) do
+            local x = 2 + (column - 1) * columnWidth
+            local right = math.min(width, x + columnWidth - 2)
+            local cells = grouped[info.value]
+            local header = string.format("%s (x%02d)", info.label, #cells)
+            local headerColor = #cells > 0 and colors.cyan or colors.gray
 
-            for index = 1, math.min(#detailCells, maxVisible) do
-                local cell = detailCells[index]
-                local column = math.floor((index - 1) / visibleRows)
-                local rowInColumn = (index - 1) % visibleRows
-                local x = 2 + column * entryWidth
-                local y = firstDetailRow + rowInColumn
+            writeAt(x, headerY, header, headerColor, nil, right)
 
+            local visible = math.min(#cells, detailRows)
+            for index = 1, visible do
+                local cell = cells[index]
                 local ratio = cell.ratio or 0
                 local color = colors.white
 
@@ -1261,19 +1288,23 @@ local function renderMEPage(now, width, height)
                     color = colors.lime
                 end
 
-                local size = cellCapacityLabel(cell.capacity)
                 local pct = cell.ratio and string.format("%5.1f%%", ratio * 100) or "  n/a "
-                local label = string.format("#%02d %-4s %s", index, size, pct)
-
-                writeAt(x, y, label, color, nil, math.min(width, x + entryWidth - 2))
+                local label = string.format("#%02d  %s", index, pct)
+                writeAt(x, firstDetailRow + index - 1, label, color, nil, right)
             end
 
-            if #detailCells > maxVisible then
-                local hidden = #detailCells - maxVisible
-                writeAt(2, contentBottom, "+" .. hidden .. " cells non affichees", colors.orange)
+            if #cells > detailRows and detailRows > 0 then
+                local hidden = #cells - detailRows
+                writeAt(x, contentBottom, "+" .. hidden .. " autres", colors.orange, nil, right)
             end
         end
+
+        if #extras > 0 and detailRows > 0 then
+            local note = "+" .. #extras .. " cell(s) de capacite non standard"
+            writeAt(2, contentBottom, note, colors.orange)
+        end
     end
+
 
     local footerLeft = string.format("ME:%s | Cells:%d | Drives:%d | detail:%ss",
         me.bridgeName or "?",
