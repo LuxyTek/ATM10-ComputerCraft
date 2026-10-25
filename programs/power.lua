@@ -425,7 +425,31 @@ local function doUpdate()
             monitor.setTextColor(colors.white)
             monitor.clear()
             centered(5, "MISE A JOUR OK", colors.lime)
-            centered(7, "Redemarrage...", colors.lightGray)
+            centered(7, "Relance automatique...", colors.lightGray)
+
+            -- Cree un lanceur temporaire dans /startup/.
+            -- Il s'auto-supprime au prochain demarrage, puis lance la nouvelle version.
+            local startupDir = "/startup"
+            local restartPath = startupDir .. "/99-power-update.lua"
+
+            if not fs.exists(startupDir) then
+                fs.makeDir(startupDir)
+            end
+
+            if fs.exists(restartPath) then
+                fs.delete(restartPath)
+            end
+
+            local restartFile = fs.open(restartPath, "w")
+            if not restartFile then
+                failUpdate("ERREUR RELANCE")
+                return false, "Impossible de creer le lanceur temporaire"
+            end
+
+            restartFile.write('fs.delete("' .. restartPath .. '")\\n')
+            restartFile.write('shell.run("' .. PROGRAM_PATH .. '")\\n')
+            restartFile.close()
+
             sleep(1)
             os.reboot()
             return true
