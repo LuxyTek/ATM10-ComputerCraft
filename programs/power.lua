@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "5.1"
+local PROGRAM_VERSION = "5.2"
 local CONFIG_PATH = "/config/power.lua"
 local UPDATE_URL = "https://raw.githubusercontent.com/LuxyTek/ATM10-ComputerCraft/main/programs/power.lua"
 local UPDATE_TEMP = "/programs/power.new"
@@ -395,15 +395,6 @@ local function findMEBridge()
         end
     end
 
-    -- Fallback pour certaines versions/configurations d'Advanced Peripherals.
-    for _, name in ipairs(peripheral.getNames()) do
-        if hasMethod(name, "isConnected")
-            and (hasMethod(name, "getItems") or hasMethod(name, "listItems"))
-            and (hasMethod(name, "getCells") or hasMethod(name, "listCells")) then
-            return peripheral.wrap(name), name
-        end
-    end
-
     return nil, nil
 end
 
@@ -669,7 +660,7 @@ local function doUpdate()
     updateInProgress = true
     updateConfirmUntil = 0
     updateMessage = nil
-    render()
+    render(false)
 
     if fs.exists(UPDATE_TEMP) then
         fs.delete(UPDATE_TEMP)
@@ -886,10 +877,23 @@ local function drawStorageRow(y, label, used, capacity, width)
     end
 end
 
-local function renderMEPage(now, width, height)
-    local me = refreshMEData(now, false)
+local function renderMEPage(now, width, height, allowRefresh)
+    local me
+
+    if allowRefresh then
+        me = refreshMEData(now, false)
+    else
+        me = meCache.data
+    end
 
     centered(3, "AE2 / ME NETWORK  v" .. PROGRAM_VERSION, colors.cyan)
+
+    if not me then
+        centered(7, "CHARGEMENT ME...", colors.yellow)
+        centered(9, "Lecture au prochain rafraichissement", colors.lightGray)
+        drawCommonFooter(width, height, "ME : chargement", now)
+        return
+    end
 
     if not me.bridgeFound then
         centered(6, "ME BRIDGE INTROUVABLE", colors.red)
@@ -1015,7 +1019,7 @@ local function renderMEPage(now, width, height)
     drawCommonFooter(width, height, footerLeft, now)
 end
 
-render = function()
+render = function(allowMERefresh)
     local now = os.epoch("utc") / 1000
 
     if now >= updateConfirmUntil then
@@ -1034,7 +1038,7 @@ render = function()
     local width, height = monitor.getSize()
 
     if activePage == "me" then
-        renderMEPage(now, width, height)
+        renderMEPage(now, width, height, allowMERefresh == true)
     else
         renderEnergyPage(now, width, height)
     end
@@ -1052,21 +1056,11 @@ end
 
 local function setPage(page)
     if activePage == page then return end
-
     activePage = page
-
-    if page == "energy" then
-        previousEnergy = nil
-        previousTime = nil
-        deltaSamples = {}
-    elseif page == "me" then
-        meCache.lastRefresh = 0
-    end
-
-    render()
+    render(false)
 end
 
-render()
+render(false)
 
 local timer = os.startTimer(config.refreshSeconds)
 
@@ -1074,7 +1068,7 @@ while true do
     local event, p1, p2, p3 = os.pullEvent()
 
     if event == "timer" and p1 == timer then
-        render()
+        render(true)
         timer = os.startTimer(config.refreshSeconds)
 
     elseif event == "monitor_touch" then
@@ -1092,7 +1086,7 @@ while true do
 
                 if now < updateConfirmUntil then
                     doUpdate()
-                    render()
+                    render(false)
                 else
                     updateConfirmUntil = now + 8
                     render()
