@@ -1,7 +1,9 @@
-local PROGRAM_VERSION = "4.4"
+local PROGRAM_VERSION = "4.5"
 local CONFIG_PATH = "/config/power.lua"
-local UPDATE_URL = "https://raw.githubusercontent.com/LuxyTek/ATM10-ComputerCraft/main/install.lua"
-local UPDATE_TEMP = "/.atm10cc_update.lua"
+local UPDATE_URL = "https://raw.githubusercontent.com/LuxyTek/ATM10-ComputerCraft/main/programs/power.lua"
+local UPDATE_TEMP = "/programs/power.new"
+local PROGRAM_PATH = "/programs/power.lua"
+local UPDATE_TIMEOUT = 12
 
 local defaults = {
     title = "MEKANISM POWER",
@@ -296,6 +298,7 @@ local peakConsumption = 0
 local updateConfirmUntil = 0
 local updateMessage = nil
 local updateMessageUntil = 0
+local updateInProgress = false
 local buttonBounds = nil
 
 local function updateTrend(now, netPerTick)
@@ -323,78 +326,120 @@ local function updateTrend(now, netPerTick)
     return total / #deltaSamples
 end
 
+local render
+
 local function drawUpdateButton(width, height, now)
-    local confirming = now < updateConfirmUntil
-    local label = confirming and "[ CONFIRMER ]" or "[ MAJ ]"
+    local label
+    local fg
+    local bg
+
+    if updateInProgress then
+        label = "[ MAJ... ]"
+        fg = colors.black
+        bg = colors.lime
+    elseif now < updateConfirmUntil then
+        label = "[ CONFIRMER ]"
+        fg = colors.black
+        bg = colors.orange
+    else
+        label = "[ MAJ ]"
+        fg = colors.white
+        bg = colors.blue
+    end
+
     local buttonWidth = #label
     local x = math.max(2, width - buttonWidth - 1)
     local y = height
-
-    local fg = confirming and colors.black or colors.white
-    local bg = confirming and colors.orange or colors.blue
 
     writeAt(x, y, label, fg, bg)
     buttonBounds = { x1 = x, x2 = x + buttonWidth - 1, y = y }
 end
 
+local function failUpdate(message)
+    updateInProgress = false
+    updateConfirmUntil = 0
+    updateMessage = message or "ECHEC MAJ"
+    updateMessageUntil = os.epoch("utc") / 1000 + 8
+
+    if fs.exists(UPDATE_TEMP) then
+        fs.delete(UPDATE_TEMP)
+    end
+end
+
 local function doUpdate()
-    monitor.setBackgroundColor(colors.black)
-    monitor.setTextColor(colors.white)
-    monitor.clear()
-    centered(5, "MISE A JOUR...", colors.yellow)
-    centered(7, "Telechargement GitHub", colors.lightGray)
+    updateInProgress = true
+    updateConfirmUntil = 0
+    updateMessage = nil
+    render()
 
     if fs.exists(UPDATE_TEMP) then
         fs.delete(UPDATE_TEMP)
     end
 
-    local response, err = http.get(UPDATE_URL)
-    if not response then
-        updateMessage = "ECHEC MAJ"
-        updateMessageUntil = os.epoch("utc") / 1000 + 8
-        updateConfirmUntil = 0
-        return false, err
+    local queued, requestError = http.request({
+        url = UPDATE_URL,
+        method = "GET",
+        redirect = true,
+        timeout = 10,
+    })
+
+    if queued == false then
+        failUpdate("HTTP REFUSE")
+        return false, requestError
     end
 
-    local body = response.readAll()
-    response.close()
+    local timeoutTimer = os.startTimer(UPDATE_TIMEOUT)
 
-    if not body or #body < 100 then
-        updateMessage = "FICHIER MAJ INVALIDE"
-        updateMessageUntil = os.epoch("utc") / 1000 + 8
-        updateConfirmUntil = 0
-        return false, "install.lua invalide"
+    while true do
+        local event, p1, p2, p3 = os.pullEvent()
+
+        if event == "http_success" and p1 == UPDATE_URL then
+            local response = p2
+            local body = response.readAll()
+            response.close()
+
+            if not body or #body < 100 or not string.find(body, "PROGRAM_VERSION", 1, true) then
+                failUpdate("FICHIER INVALIDE")
+                return false, "Programme telecharge invalide"
+            end
+
+            local file = fs.open(UPDATE_TEMP, "w")
+            if not file then
+                failUpdate("ERREUR ECRITURE")
+                return false, "Impossible d'ecrire le fichier temporaire"
+            end
+
+            file.write(body)
+            file.close()
+
+            if fs.exists(PROGRAM_PATH) then
+                fs.delete(PROGRAM_PATH)
+            end
+            fs.move(UPDATE_TEMP, PROGRAM_PATH)
+
+            updateMessage = "MAJ OK"
+            updateMessageUntil = os.epoch("utc") / 1000 + 3
+            updateInProgress = false
+
+            monitor.setBackgroundColor(colors.black)
+            monitor.setTextColor(colors.white)
+            monitor.clear()
+            centered(5, "MISE A JOUR OK", colors.lime)
+            centered(7, "Redemarrage...", colors.lightGray)
+            sleep(1)
+            os.reboot()
+            return true
+
+        elseif event == "http_failure" and p1 == UPDATE_URL then
+            local err = p2
+            failUpdate("ECHEC HTTP")
+            return false, err
+
+        elseif event == "timer" and p1 == timeoutTimer then
+            failUpdate("TIMEOUT MAJ")
+            return false, "Timeout de mise a jour"
+        end
     end
-
-    local file = fs.open(UPDATE_TEMP, "w")
-    if not file then
-        updateMessage = "ERREUR ECRITURE"
-        updateMessageUntil = os.epoch("utc") / 1000 + 8
-        updateConfirmUntil = 0
-        return false, "Impossible d'ecrire le fichier temporaire"
-    end
-
-    file.write(body)
-    file.close()
-
-    centered(9, "Installation...", colors.cyan)
-    local ok = shell.run(UPDATE_TEMP)
-
-    if fs.exists(UPDATE_TEMP) then
-        fs.delete(UPDATE_TEMP)
-    end
-
-    if not ok then
-        updateMessage = "ECHEC INSTALLATION"
-        updateMessageUntil = os.epoch("utc") / 1000 + 8
-        updateConfirmUntil = 0
-        return false, "Installateur en erreur"
-    end
-
-    centered(11, "MAJ OK - REDEMARRAGE", colors.lime)
-    sleep(1)
-    os.reboot()
-    return true
 end
 
 local function collectData(now)
@@ -427,7 +472,7 @@ local function collectData(now)
     return storages, totalEnergy, totalCapacity, fill, updateTrend(now, netPerTick)
 end
 
-local function render()
+render = function()
     local now = os.epoch("utc") / 1000
 
     if now >= updateConfirmUntil then
@@ -595,7 +640,7 @@ while true do
         local x = p2
         local y = p3
 
-        if touchedMonitor == monitorName and isInsideButton(x, y) then
+        if touchedMonitor == monitorName and isInsideButton(x, y) and not updateInProgress then
             local now = os.epoch("utc") / 1000
 
             if now < updateConfirmUntil then
