@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "5.8"
+local PROGRAM_VERSION = "5.9"
 local CONFIG_PATH = "/config/power.lua"
 local UPDATE_URL = "https://raw.githubusercontent.com/LuxyTek/ATM10-ComputerCraft/main/programs/power.lua"
 local UPDATE_TEMP = "/programs/power.new"
@@ -1274,16 +1274,12 @@ local function renderMEPage(now, width, height)
             for index = 1, visible do
                 local cell = cells[index]
                 local ratio = cell.ratio or 0
-                local color = colors.white
+                local color = colors.lime
 
                 if ratio >= 0.90 then
                     color = colors.red
                 elseif ratio >= 0.75 then
                     color = colors.orange
-                elseif ratio <= 0.10 then
-                    color = colors.lightGray
-                else
-                    color = colors.lime
                 end
 
                 local pct = cell.ratio and string.format("%5.1f%%", ratio * 100) or "  n/a "
