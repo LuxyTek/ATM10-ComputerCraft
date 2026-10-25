@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "5.4"
+local PROGRAM_VERSION = "5.5"
 local CONFIG_PATH = "/config/power.lua"
 local UPDATE_URL = "https://raw.githubusercontent.com/LuxyTek/ATM10-ComputerCraft/main/programs/power.lua"
 local UPDATE_TEMP = "/programs/power.new"
@@ -479,6 +479,108 @@ local function normalizeCells(cells)
     return result
 end
 
+
+local function cellCapacityLabel(capacity)
+    local known = {
+        [4096] = "4K",
+        [8192] = "8K",
+        [16384] = "16K",
+        [65536] = "64K",
+        [262144] = "256K",
+    }
+
+    if known[capacity] then
+        return known[capacity]
+    end
+
+    if capacity and capacity > 0 then
+        return string.format("%.0fK", capacity / 1024)
+    end
+
+    return "?"
+end
+
+local function groupCellsByCapacity(cells)
+    local standardOrder = { 4096, 8192, 16384, 65536, 262144 }
+    local groupsByCapacity = {}
+
+    for _, capacity in ipairs(standardOrder) do
+        groupsByCapacity[capacity] = {
+            capacityPerCell = capacity,
+            label = cellCapacityLabel(capacity),
+            count = 0,
+            used = 0,
+            capacity = 0,
+            alerts = 0,
+        }
+    end
+
+    for _, cell in ipairs(cells or {}) do
+        if cell.capacity and cell.capacity > 0 then
+            local group = groupsByCapacity[cell.capacity]
+
+            if not group then
+                group = {
+                    capacityPerCell = cell.capacity,
+                    label = cellCapacityLabel(cell.capacity),
+                    count = 0,
+                    used = 0,
+                    capacity = 0,
+                    alerts = 0,
+                }
+                groupsByCapacity[cell.capacity] = group
+            end
+
+            group.count = group.count + 1
+            group.used = group.used + (cell.used or 0)
+            group.capacity = group.capacity + cell.capacity
+
+            if cell.ratio and cell.ratio >= 0.90 then
+                group.alerts = group.alerts + 1
+            end
+        end
+    end
+
+    local groups = {}
+
+    for _, capacity in ipairs(standardOrder) do
+        table.insert(groups, groupsByCapacity[capacity])
+    end
+
+    local extras = {}
+    for capacity, group in pairs(groupsByCapacity) do
+        local isStandard = false
+        for _, standard in ipairs(standardOrder) do
+            if capacity == standard then
+                isStandard = true
+                break
+            end
+        end
+
+        if not isStandard then
+            table.insert(extras, group)
+        end
+    end
+
+    table.sort(extras, function(a, b)
+        return a.capacityPerCell < b.capacityPerCell
+    end)
+
+    for _, group in ipairs(extras) do
+        table.insert(groups, group)
+    end
+
+    for _, group in ipairs(groups) do
+        if group.capacity > 0 then
+            group.ratio = math.max(0, math.min(1, group.used / group.capacity))
+        else
+            group.ratio = 0
+        end
+    end
+
+    return groups
+end
+
 local function resourceName(resource)
     if type(resource) ~= "table" then
         return tostring(resource or "craft")
@@ -535,6 +637,7 @@ local function refreshMEData(now, forceFast, forceHeavy)
 
     local data = meCache.data or {
         cells = {},
+        cellGroups = {},
         tasks = {},
         cpus = {},
     }
@@ -591,6 +694,7 @@ local function refreshMEData(now, forceFast, forceHeavy)
         data.taskCount = countEntries(tasks)
         data.cpuCount = countEntries(cpus)
         data.cells = normalizeCells(cells)
+        data.cellGroups = groupCellsByCapacity(data.cells)
         data.tasks = normalizeTasks(tasks)
         data.cpus = cpus
 
@@ -1004,61 +1108,92 @@ local function renderMEPage(now, width, height)
 
     horizontalLine(18, "-", colors.gray)
 
-    local cellTitle = "CELLULES LES PLUS REMPLIES"
+    local cellTitle = "CELLULES PAR CAPACITE"
     if (me.cellAlerts or 0) > 0 then
-        cellTitle = cellTitle .. "  ! " .. me.cellAlerts .. " >90%"
+        cellTitle = cellTitle .. "  ! " .. me.cellAlerts .. " CELL >90%"
     end
     writeAt(2, 19, cellTitle, (me.cellAlerts or 0) > 0 and colors.orange or colors.cyan)
 
     local contentBottom = height - 3
-    local craftColumnX = math.floor(width * 0.58)
+    local craftColumnX = math.floor(width * 0.66)
     local cellRight = craftColumnX - 2
 
     writeAt(craftColumnX, 19, "CRAFTS ACTIFS", colors.cyan)
 
-    local rowsAvailable = math.max(0, contentBottom - 19)
-    local maxCellRows = math.min(#me.cells, rowsAvailable)
+    local labelX = 2
+    local countX = 14
+    local barX = 21
+    local barWidth = 16
+    local percentX = barX + barWidth + 2
+    local usageX = percentX + 8
 
-    for index = 1, maxCellRows do
-        local cell = me.cells[index]
-        local row = 19 + index
-        local color = colors.white
+    writeAt(labelX, 20, "CAPACITE", colors.lightGray, nil, cellRight)
+    writeAt(countX, 20, "QTE", colors.lightGray, nil, cellRight)
+    writeAt(barX, 20, "REMPLISSAGE", colors.lightGray, nil, cellRight)
+    writeAt(percentX, 20, "%", colors.lightGray, nil, cellRight)
+    writeAt(usageX, 20, "UTILISE", colors.lightGray, nil, cellRight)
 
-        if cell.ratio and cell.ratio >= 0.90 then
-            color = colors.red
-        elseif cell.ratio and cell.ratio >= 0.75 then
-            color = colors.orange
+    local groups = me.cellGroups or groupCellsByCapacity(me.cells or {})
+    local firstGroupRow = 21
+    local rowsAvailable = math.max(0, contentBottom - firstGroupRow + 1)
+    local maxGroupRows = math.min(#groups, rowsAvailable)
+
+    for index = 1, maxGroupRows do
+        local group = groups[index]
+        local row = firstGroupRow + index - 1
+        local ratio = group.ratio or 0
+
+        local rowColor = colors.white
+        if group.count == 0 then
+            rowColor = colors.gray
+        elseif group.alerts > 0 then
+            rowColor = colors.orange
+        elseif ratio >= 0.90 then
+            rowColor = colors.red
         end
 
-        local usageText = cell.ratio and string.format("%5.1f%%", cell.ratio * 100) or "  n/a "
-        local byteText = ""
-        if cell.used and cell.capacity then
-            byteText = " " .. formatBytes(cell.used) .. "/" .. formatBytes(cell.capacity)
+        local rowBackground = colors.black
+        if monitor.isColor() and index % 2 == 0 then
+            rowBackground = colors.gray
         end
 
-        local sizeText = ""
-        if cell.capacity then
-            sizeText = formatBytes(cell.capacity)
-        end
+        fillRow(row, 1, cellRight, rowBackground)
 
-        writeAt(2, row, string.format("%02d %-5s %-8s %s%s",
-            index, cell.type, sizeText, usageText, byteText), color, nil, cellRight)
+        writeAt(labelX, row, "CELL " .. group.label, rowColor, rowBackground, cellRight)
+
+        local countText = string.format("x%02d", group.count)
+        if group.alerts > 0 then
+            countText = countText .. " !" .. group.alerts
+        end
+        writeAt(countX, row, countText, rowColor, rowBackground, cellRight)
+
+        if group.count > 0 then
+            drawMiniBar(barX, row, barWidth, ratio, cellRight)
+            writeAt(percentX, row, string.format("%5.1f", ratio * 100), rowColor, rowBackground, cellRight)
+            writeAt(usageX, row,
+                formatBytes(group.used) .. "/" .. formatBytes(group.capacity),
+                rowColor, rowBackground, cellRight)
+        else
+            writeAt(barX, row, string.rep("-", barWidth), colors.gray, rowBackground, cellRight)
+            writeAt(percentX, row, "  0.0", colors.gray, rowBackground, cellRight)
+            writeAt(usageX, row, "--", colors.gray, rowBackground, cellRight)
+        end
     end
 
-    if #me.cells == 0 then
-        writeAt(2, 20, "Aucune cellule lisible", colors.gray, nil, cellRight)
+    if #groups == 0 then
+        writeAt(2, 21, "Aucune cellule lisible", colors.gray, nil, cellRight)
     end
 
-    local maxTaskRows = math.min(#me.tasks, rowsAvailable)
+    local maxTaskRows = math.min(#me.tasks, math.max(0, contentBottom - 20))
     for index = 1, maxTaskRows do
         local task = me.tasks[index]
-        local row = 19 + index
+        local row = 20 + index
         local progress = task.completion and string.format("%3.0f%% ", task.completion * 100) or ""
         writeAt(craftColumnX, row, progress .. task.name, colors.white)
     end
 
     if #me.tasks == 0 then
-        writeAt(craftColumnX, 20, "Aucun craft actif", colors.gray)
+        writeAt(craftColumnX, 21, "Aucun craft actif", colors.gray)
     end
 
     local footerLeft = string.format("ME:%s | Cells:%d | Drives:%d | detail:%ss",
