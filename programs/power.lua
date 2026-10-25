@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "5.5"
+local PROGRAM_VERSION = "5.6"
 local CONFIG_PATH = "/config/power.lua"
 local UPDATE_URL = "https://raw.githubusercontent.com/LuxyTek/ATM10-ComputerCraft/main/programs/power.lua"
 local UPDATE_TEMP = "/programs/power.new"
@@ -579,6 +579,30 @@ local function groupCellsByCapacity(cells)
     end
 
     return groups
+end
+
+
+local function cellsForDisplay(cells)
+    local result = {}
+
+    for _, cell in ipairs(cells or {}) do
+        table.insert(result, cell)
+    end
+
+    table.sort(result, function(a, b)
+        local ac = a.capacity or math.huge
+        local bc = b.capacity or math.huge
+
+        if ac ~= bc then
+            return ac < bc
+        end
+
+        local ar = a.ratio or -1
+        local br = b.ratio or -1
+        return ar > br
+    end)
+
+    return result
 end
 
 local function resourceName(resource)
@@ -1184,7 +1208,7 @@ local function renderMEPage(now, width, height)
         writeAt(2, 21, "Aucune cellule lisible", colors.gray, nil, cellRight)
     end
 
-    local maxTaskRows = math.min(#me.tasks, math.max(0, contentBottom - 20))
+    local maxTaskRows = math.min(#me.tasks, 5)
     for index = 1, maxTaskRows do
         local task = me.tasks[index]
         local row = 20 + index
@@ -1194,6 +1218,61 @@ local function renderMEPage(now, width, height)
 
     if #me.tasks == 0 then
         writeAt(craftColumnX, 21, "Aucun craft actif", colors.gray)
+    elseif #me.tasks > maxTaskRows then
+        writeAt(craftColumnX, 20 + maxTaskRows + 1,
+            "+" .. tostring(#me.tasks - maxTaskRows) .. " autres", colors.lightGray)
+    end
+
+    local detailTop = firstGroupRow + maxGroupRows + 2
+    if detailTop < contentBottom then
+        horizontalLine(detailTop - 1, "-", colors.gray)
+        writeAt(2, detailTop, "DETAIL DES CELLS", colors.cyan)
+
+        local detailCells = cellsForDisplay(me.cells or {})
+        local firstDetailRow = detailTop + 1
+        local detailRows = math.max(0, contentBottom - firstDetailRow + 1)
+
+        if #detailCells == 0 or detailRows == 0 then
+            writeAt(2, firstDetailRow, "Aucune cell lisible", colors.gray)
+        else
+            local entryWidth = 18
+            local columns = math.max(1, math.floor((width - 3) / entryWidth))
+            local rowsNeeded = math.ceil(#detailCells / columns)
+            local visibleRows = math.min(detailRows, rowsNeeded)
+            local maxVisible = visibleRows * columns
+
+            for index = 1, math.min(#detailCells, maxVisible) do
+                local cell = detailCells[index]
+                local column = math.floor((index - 1) / visibleRows)
+                local rowInColumn = (index - 1) % visibleRows
+                local x = 2 + column * entryWidth
+                local y = firstDetailRow + rowInColumn
+
+                local ratio = cell.ratio or 0
+                local color = colors.white
+
+                if ratio >= 0.90 then
+                    color = colors.red
+                elseif ratio >= 0.75 then
+                    color = colors.orange
+                elseif ratio <= 0.10 then
+                    color = colors.lightGray
+                else
+                    color = colors.lime
+                end
+
+                local size = cellCapacityLabel(cell.capacity)
+                local pct = cell.ratio and string.format("%5.1f%%", ratio * 100) or "  n/a "
+                local label = string.format("#%02d %-4s %s", index, size, pct)
+
+                writeAt(x, y, label, color, nil, math.min(width, x + entryWidth - 2))
+            end
+
+            if #detailCells > maxVisible then
+                local hidden = #detailCells - maxVisible
+                writeAt(2, contentBottom, "+" .. hidden .. " cells non affichees", colors.orange)
+            end
+        end
     end
 
     local footerLeft = string.format("ME:%s | Cells:%d | Drives:%d | detail:%ss",
