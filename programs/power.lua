@@ -1,7 +1,8 @@
-local PROGRAM_VERSION = "6.3"
+local PROGRAM_VERSION = "1.0.0"
 local CONFIG_PATH = "/config/power.lua"
 local UPDATE_URL = "https://raw.githubusercontent.com/LuxyTek/ATM10-ComputerCraft/main/programs/power.lua"
 local UPDATE_TEMP = "/programs/power.new"
+local UPDATE_BACKUP = "/programs/power.bak"
 local PROGRAM_PATH = "/programs/power.lua"
 local UPDATE_TIMEOUT = 12
 
@@ -9,6 +10,7 @@ local defaults = {
     refreshSeconds = 1,
     meRefreshSeconds = 5,
     meHeavyRefreshSeconds = 30,
+    peripheralRefreshSeconds = 10,
     textScale = 0.5,
     monitor = nil,
     devices = {},
@@ -153,30 +155,6 @@ local function fillRow(y, leftX, rightX, bg)
     monitor.setBackgroundColor(colors.black)
 end
 
-local function fillRect(x1, y1, x2, y2, bg)
-    local width, height = monitor.getSize()
-    x1 = math.max(1, x1)
-    y1 = math.max(1, y1)
-    x2 = math.min(width, x2)
-    y2 = math.min(height, y2)
-
-    if x2 < x1 or y2 < y1 then return end
-
-    if monitor.isColor() then
-        monitor.setBackgroundColor(bg)
-    end
-
-    for y = y1, y2 do
-        monitor.setCursorPos(x1, y)
-        monitor.write(string.rep(" ", x2 - x1 + 1))
-    end
-
-    if monitor.isColor() then
-        monitor.setBackgroundColor(colors.black)
-        monitor.setTextColor(colors.white)
-    end
-end
-
 local function drawBox(x1, y1, x2, y2, borderColor)
     if x2 <= x1 or y2 <= y1 then return end
 
@@ -199,35 +177,6 @@ local function drawStatusLight(x, y, color)
     writeAt(x, y, "[", colors.lightGray, colors.black, x)
     writeAt(x + 1, y, "O", color, colors.black, x + 1)
     writeAt(x + 2, y, "]", colors.lightGray, colors.black, x + 2)
-end
-
-
-local function cardTextColor(bg)
-    if bg == colors.red or bg == colors.gray or bg == colors.black then
-        return colors.white
-    end
-    return colors.black
-end
-
-local function drawCardBar(x, y, width, ratio, bg, rightLimit)
-    if width <= 0 then return end
-    ratio = math.max(0, math.min(1, ratio or 0))
-    local maxWidth = (rightLimit or select(1, monitor.getSize())) - x + 1
-    width = math.max(1, math.min(width, maxWidth))
-    local filled = math.floor(width * ratio + 0.5)
-
-    monitor.setCursorPos(x, y)
-
-    if monitor.isColor() then
-        monitor.setBackgroundColor(colors.white)
-        monitor.write(string.rep(" ", filled))
-        monitor.setBackgroundColor(colors.black)
-        monitor.write(string.rep(" ", width - filled))
-        monitor.setBackgroundColor(bg)
-        monitor.setTextColor(cardTextColor(bg))
-    else
-        monitor.write(string.rep("#", filled) .. string.rep("-", width - filled))
-    end
 end
 
 
@@ -438,7 +387,20 @@ local function isEnergyStorage(name)
         and (hasMethod(name, "getEnergyCapacity") or hasMethod(name, "getMaxEnergy"))
 end
 
-local function discoverStorages()
+local storageDiscoveryCache = {
+    names = {},
+    lastRefresh = 0,
+}
+
+local function discoverStorages(now, force)
+    now = now or (os.epoch("utc") / 1000)
+
+    if not force
+        and storageDiscoveryCache.lastRefresh > 0
+        and (now - storageDiscoveryCache.lastRefresh) < config.peripheralRefreshSeconds then
+        return storageDiscoveryCache.names
+    end
+
     local names = {}
 
     if #config.devices > 0 then
@@ -456,6 +418,8 @@ local function discoverStorages()
     end
 
     table.sort(names)
+    storageDiscoveryCache.names = names
+    storageDiscoveryCache.lastRefresh = now
     return names
 end
 
@@ -516,7 +480,7 @@ local function collectPowerData(now)
     local totalEnergy = 0
     local totalCapacity = 0
 
-    for _, name in ipairs(discoverStorages()) do
+    for _, name in ipairs(discoverStorages(now, false)) do
         local storage = readStorage(name)
         if storage then
             table.insert(storages, storage)
@@ -547,13 +511,35 @@ local function collectPowerData(now)
     }
 end
 
-local function findMEBridge()
+local mePeripheralCache = {
+    device = nil,
+    name = nil,
+    lastRefresh = 0,
+}
+
+local function findMEBridge(now, force)
+    now = now or (os.epoch("utc") / 1000)
+
+    if not force
+        and mePeripheralCache.name
+        and mePeripheralCache.lastRefresh > 0
+        and (now - mePeripheralCache.lastRefresh) < config.peripheralRefreshSeconds
+        and peripheral.isPresent(mePeripheralCache.name) then
+        return mePeripheralCache.device, mePeripheralCache.name
+    end
+
     for _, name in ipairs(peripheral.getNames()) do
         if peripheral.hasType(name, "me_bridge") or peripheral.hasType(name, "meBridge") then
-            return peripheral.wrap(name), name
+            mePeripheralCache.device = peripheral.wrap(name)
+            mePeripheralCache.name = name
+            mePeripheralCache.lastRefresh = now
+            return mePeripheralCache.device, name
         end
     end
 
+    mePeripheralCache.device = nil
+    mePeripheralCache.name = nil
+    mePeripheralCache.lastRefresh = now
     return nil, nil
 end
 
@@ -739,29 +725,6 @@ local function groupCellsByCapacity(cells)
 end
 
 
-local function cellsForDisplay(cells)
-    local result = {}
-
-    for _, cell in ipairs(cells or {}) do
-        table.insert(result, cell)
-    end
-
-    table.sort(result, function(a, b)
-        local ac = a.capacity or math.huge
-        local bc = b.capacity or math.huge
-
-        if ac ~= bc then
-            return ac < bc
-        end
-
-        local ar = a.ratio or -1
-        local br = b.ratio or -1
-        return ar > br
-    end)
-
-    return result
-end
-
 local function resourceName(resource)
     if type(resource) ~= "table" then
         return tostring(resource or "craft")
@@ -800,7 +763,7 @@ local meCache = {
 }
 
 local function refreshMEData(now, forceFast, forceHeavy)
-    local bridge, bridgeName = findMEBridge()
+    local bridge, bridgeName = findMEBridge(now, false)
 
     if not bridge then
         meCache.data = {
@@ -861,13 +824,21 @@ local function refreshMEData(now, forceFast, forceHeavy)
         -- These calls can return very large tables on a mature ME network.
         -- Keep them out of the fast polling path.
         local items = callList(bridge, "getItems", "listItems")
+        sleep(0)
         local fluids = callList(bridge, "getFluids", "listFluids")
+        sleep(0)
         local chemicals = callList(bridge, "getChemicals", "listChemicals")
+        sleep(0)
         local craftables = callList(bridge, "getCraftableItems", "listCraftableItems")
+        sleep(0)
         local patterns = callNoArgList(bridge, "getPatterns", nil)
+        sleep(0)
         local cells = callNoArgList(bridge, "getCells", "listCells")
+        sleep(0)
         local drives = callNoArgList(bridge, "getDrives", nil)
+        sleep(0)
         local tasks = callNoArgList(bridge, "getCraftingTasks", nil)
+        sleep(0)
         local cpus = callNoArgList(bridge, "getCraftingCPUs", nil)
 
         data.cellCount = countEntries(cells)
@@ -1011,6 +982,12 @@ local function doUpdate()
                 return false, "Programme telecharge invalide"
             end
 
+            local compiled, compileError = load(body, "@power.new")
+            if not compiled then
+                failUpdate("SYNTAXE INVALIDE")
+                return false, compileError
+            end
+
             local file = fs.open(UPDATE_TEMP, "w")
             if not file then
                 failUpdate("ERREUR ECRITURE")
@@ -1020,10 +997,39 @@ local function doUpdate()
             file.write(body)
             file.close()
 
-            if fs.exists(PROGRAM_PATH) then
-                fs.delete(PROGRAM_PATH)
+            if fs.exists(UPDATE_BACKUP) then
+                fs.delete(UPDATE_BACKUP)
             end
-            fs.move(UPDATE_TEMP, PROGRAM_PATH)
+
+            if fs.exists(PROGRAM_PATH) then
+                local backupOK, backupError = pcall(fs.copy, PROGRAM_PATH, UPDATE_BACKUP)
+                if not backupOK then
+                    failUpdate("BACKUP IMPOSSIBLE")
+                    return false, backupError
+                end
+            end
+
+            local replaceOK, replaceError = pcall(function()
+                if fs.exists(PROGRAM_PATH) then
+                    fs.delete(PROGRAM_PATH)
+                end
+                fs.move(UPDATE_TEMP, PROGRAM_PATH)
+            end)
+
+            if not replaceOK then
+                if fs.exists(UPDATE_BACKUP) then
+                    if fs.exists(PROGRAM_PATH) then
+                        fs.delete(PROGRAM_PATH)
+                    end
+                    fs.copy(UPDATE_BACKUP, PROGRAM_PATH)
+                end
+                failUpdate("REMPLACEMENT ECHEC")
+                return false, replaceError
+            end
+
+            if fs.exists(UPDATE_BACKUP) then
+                fs.delete(UPDATE_BACKUP)
+            end
 
             monitor.setBackgroundColor(colors.black)
             monitor.setTextColor(colors.white)
@@ -1409,7 +1415,7 @@ local function drawStorageRow(y, label, used, capacity, width)
     local ratio = storageRatio(used, capacity)
     local barX = 14
     local barWidth = math.max(8, math.min(16, math.floor(width * 0.20)))
-    drawMiniBar(barX, y, barWidth, ratio, width - 2)
+    drawUsageBar(barX, y, barWidth, ratio, width - 2)
 
     local textX = barX + barWidth + 2
     writeAt(textX, y, string.format("%5.1f%%  %s / %s",
@@ -1561,7 +1567,7 @@ local function renderMEPage(now, width, height)
         writeAt(countX, row, countText, rowColor, rowBackground, cellRight)
 
         if group.count > 0 then
-            drawMiniBar(barX, row, barWidth, ratio, cellRight)
+            drawUsageBar(barX, row, barWidth, ratio, cellRight)
             writeAt(percentX, row, string.format("%5.1f", ratio * 100), rowColor, rowBackground, cellRight)
             writeAt(usageX, row,
                 formatBytes(group.used) .. "/" .. formatBytes(group.capacity),
