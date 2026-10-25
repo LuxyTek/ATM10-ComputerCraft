@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "5.2"
+local PROGRAM_VERSION = "5.3"
 local CONFIG_PATH = "/config/power.lua"
 local UPDATE_URL = "https://raw.githubusercontent.com/LuxyTek/ATM10-ComputerCraft/main/programs/power.lua"
 local UPDATE_TEMP = "/programs/power.new"
@@ -8,6 +8,7 @@ local UPDATE_TIMEOUT = 12
 local defaults = {
     refreshSeconds = 1,
     meRefreshSeconds = 5,
+    meHeavyRefreshSeconds = 30,
     textScale = 0.5,
     monitor = nil,
     devices = {},
@@ -508,86 +509,113 @@ local function normalizeTasks(tasks)
 end
 
 local meCache = {
-    lastRefresh = 0,
+    lastFastRefresh = 0,
+    lastHeavyRefresh = 0,
     data = nil,
 }
 
-local function refreshMEData(now, force)
-    if not force and meCache.data and (now - meCache.lastRefresh) < config.meRefreshSeconds then
+local function refreshMEData(now, forceFast, forceHeavy)
+    local bridge, bridgeName = findMEBridge()
+
+    if not bridge then
+        meCache.data = {
+            bridgeName = nil,
+            bridgeFound = false,
+            connected = false,
+            online = false,
+            cells = {},
+            tasks = {},
+            cpus = {},
+        }
+        meCache.lastFastRefresh = now
         return meCache.data
     end
 
-    local bridge, bridgeName = findMEBridge()
-
-    local data = {
-        bridgeName = bridgeName,
-        bridgeFound = bridge ~= nil,
-        connected = false,
-        online = false,
+    local data = meCache.data or {
         cells = {},
         tasks = {},
+        cpus = {},
     }
 
-    if not bridge then
-        meCache.lastRefresh = now
-        meCache.data = data
-        return data
-    end
+    data.bridgeName = bridgeName
+    data.bridgeFound = true
 
-    data.connected = select(1, callFirst(bridge, { "isConnected" })) == true
-    data.online = select(1, callFirst(bridge, { "isOnline" })) == true
+    local doFast = forceFast
+        or meCache.lastFastRefresh == 0
+        or (now - meCache.lastFastRefresh) >= config.meRefreshSeconds
 
-    data.storedEnergy = select(1, callFirst(bridge, { "getStoredEnergy", "getEnergyStorage" }))
-    data.energyCapacity = select(1, callFirst(bridge, { "getEnergyCapacity", "getMaxEnergyStorage" }))
-    data.energyUsage = select(1, callFirst(bridge, { "getEnergyUsage" }))
-    data.avgInjection = select(1, callFirst(bridge, { "getAvgPowerInjection" }))
+    local doHeavy = forceHeavy
+        or meCache.lastHeavyRefresh == 0
+        or (now - meCache.lastHeavyRefresh) >= config.meHeavyRefreshSeconds
 
-    data.maxItemStorage = select(1, callFirst(bridge, { "getMaxItemStorage" }))
-    data.usedItemStorage = select(1, callFirst(bridge, { "getUsedItemStorage" }))
-    data.maxFluidStorage = select(1, callFirst(bridge, { "getMaxFluidStorage" }))
-    data.usedFluidStorage = select(1, callFirst(bridge, { "getUsedFluidStorage" }))
-    data.maxChemicalStorage = select(1, callFirst(bridge, { "getMaxChemicalStorage" }))
-    data.usedChemicalStorage = select(1, callFirst(bridge, { "getUsedChemicalStorage" }))
+    if doFast then
+        data.connected = select(1, callFirst(bridge, { "isConnected" })) == true
+        data.online = select(1, callFirst(bridge, { "isOnline" })) == true
 
-    data.maxExternItemStorage = select(1, callFirst(bridge, { "getMaxExternItemStorage", "getTotalExternItemStorage" }))
-    data.usedExternItemStorage = select(1, callFirst(bridge, { "getUsedExternItemStorage" }))
-    data.maxExternFluidStorage = select(1, callFirst(bridge, { "getMaxExternFluidStorage" }))
-    data.usedExternFluidStorage = select(1, callFirst(bridge, { "getUsedExternFluidStorage" }))
-    data.maxExternChemicalStorage = select(1, callFirst(bridge, { "getMaxExternChemicalStorage" }))
-    data.usedExternChemicalStorage = select(1, callFirst(bridge, { "getUsedExternChemicalStorage" }))
+        data.storedEnergy = select(1, callFirst(bridge, { "getStoredEnergy", "getEnergyStorage" }))
+        data.energyCapacity = select(1, callFirst(bridge, { "getEnergyCapacity", "getMaxEnergyStorage" }))
+        data.energyUsage = select(1, callFirst(bridge, { "getEnergyUsage" }))
+        data.avgInjection = select(1, callFirst(bridge, { "getAvgPowerInjection", "getAverageEnergyInput" }))
 
-    local items = callList(bridge, "getItems", "listItems")
-    local fluids = callList(bridge, "getFluids", "listFluid")
-    local chemicals = callList(bridge, "getChemicals", "listGas")
-    local craftables = callList(bridge, "getCraftableItems", "listCraftableItems")
-    local cells = callNoArgList(bridge, "getCells", "listCells")
-    local drives = callNoArgList(bridge, "getDrives", nil)
-    local patterns = callNoArgList(bridge, "getPatterns", nil)
-    local tasks = callNoArgList(bridge, "getCraftingTasks", nil)
-    local cpus = callNoArgList(bridge, "getCraftingCPUs", nil)
+        data.maxItemStorage = select(1, callFirst(bridge, { "getMaxItemStorage" }))
+        data.usedItemStorage = select(1, callFirst(bridge, { "getUsedItemStorage" }))
+        data.maxFluidStorage = select(1, callFirst(bridge, { "getMaxFluidStorage" }))
+        data.usedFluidStorage = select(1, callFirst(bridge, { "getUsedFluidStorage" }))
+        data.maxChemicalStorage = select(1, callFirst(bridge, { "getMaxChemicalStorage" }))
+        data.usedChemicalStorage = select(1, callFirst(bridge, { "getUsedChemicalStorage" }))
 
-    data.itemTypes = countEntries(items)
-    data.fluidTypes = countEntries(fluids)
-    data.chemicalTypes = countEntries(chemicals)
-    data.craftableItems = countEntries(craftables)
-    data.driveCount = countEntries(drives)
-    data.cellCount = countEntries(cells)
-    data.patternCount = countEntries(patterns)
-    data.taskCount = countEntries(tasks)
-    data.cpuCount = countEntries(cpus)
+        data.maxExternItemStorage = select(1, callFirst(bridge, { "getMaxExternItemStorage" }))
+        data.usedExternItemStorage = select(1, callFirst(bridge, { "getUsedExternItemStorage" }))
+        data.usedExternItemCount = select(1, callFirst(bridge, { "getUsedExternItemCount" }))
 
-    data.cells = normalizeCells(cells)
-    data.tasks = normalizeTasks(tasks)
+        local cells = callNoArgList(bridge, "getCells", "listCells")
+        local drives = callNoArgList(bridge, "getDrives", nil)
+        local tasks = callNoArgList(bridge, "getCraftingTasks", nil)
+        local cpus = callNoArgList(bridge, "getCraftingCPUs", nil)
 
-    local alerts = 0
-    for _, cell in ipairs(data.cells) do
-        if cell.ratio and cell.ratio >= 0.90 then
-            alerts = alerts + 1
+        data.cellCount = countEntries(cells)
+        data.driveCount = countEntries(drives)
+        data.taskCount = countEntries(tasks)
+        data.cpuCount = countEntries(cpus)
+        data.cells = normalizeCells(cells)
+        data.tasks = normalizeTasks(tasks)
+        data.cpus = cpus
+
+        local busy = 0
+        for _, cpu in pairs(cpus) do
+            if type(cpu) == "table" and cpu.isBusy == true then
+                busy = busy + 1
+            end
         end
-    end
-    data.cellAlerts = alerts
+        data.busyCpuCount = busy
 
-    meCache.lastRefresh = now
+        local alerts = 0
+        for _, cell in ipairs(data.cells) do
+            if cell.ratio and cell.ratio >= 0.90 then
+                alerts = alerts + 1
+            end
+        end
+        data.cellAlerts = alerts
+        meCache.lastFastRefresh = now
+    end
+
+    if doHeavy then
+        -- These calls can return very large tables on a mature ME network.
+        -- Keep them out of the fast polling path.
+        local items = callList(bridge, "getItems", "listItems")
+        local fluids = callList(bridge, "getFluids", "listFluids")
+        local chemicals = callList(bridge, "getChemicals", "listChemicals")
+        local craftables = callList(bridge, "getCraftableItems", "listCraftableItems")
+        local patterns = callNoArgList(bridge, "getPatterns", nil)
+
+        data.itemTypes = countEntries(items)
+        data.fluidTypes = countEntries(fluids)
+        data.chemicalTypes = countEntries(chemicals)
+        data.craftableItems = countEntries(craftables)
+        data.patternCount = countEntries(patterns)
+        meCache.lastHeavyRefresh = now
+    end
+
     meCache.data = data
     return data
 end
@@ -660,7 +688,7 @@ local function doUpdate()
     updateInProgress = true
     updateConfirmUntil = 0
     updateMessage = nil
-    render(false)
+    render()
 
     if fs.exists(UPDATE_TEMP) then
         fs.delete(UPDATE_TEMP)
@@ -745,8 +773,16 @@ local function drawCommonFooter(width, height, leftText, now)
     end
 end
 
+local powerCache = nil
+
 local function renderEnergyPage(now, width, height)
-    local power = collectPowerData(now)
+    local power = powerCache or {
+        storages = {},
+        totalEnergy = 0,
+        totalCapacity = 0,
+        fill = 0,
+        averageNet = nil,
+    }
 
     centered(3, "MEKANISM POWER  v" .. PROGRAM_VERSION, colors.cyan)
     centered(5, formatEnergy(power.totalEnergy) .. " / " .. formatEnergy(power.totalCapacity), colors.white)
@@ -861,30 +897,30 @@ end
 local function drawStorageRow(y, label, used, capacity, width)
     writeAt(2, y, label, colors.white)
 
-    local ratio = storageRatio(used, capacity)
-    if ratio then
-        local barX = 14
-        local barWidth = math.max(8, math.min(16, math.floor(width * 0.20)))
-        drawMiniBar(barX, y, barWidth, ratio, width - 2)
-
-        local textX = barX + barWidth + 2
-        writeAt(textX, y, string.format("%5.1f%%  %s / %s",
-            ratio * 100,
-            formatBytes(used),
-            formatBytes(capacity)), colors.lightGray)
-    else
-        writeAt(14, y, "n/a", colors.gray)
+    if used == nil or capacity == nil then
+        writeAt(14, y, "indisponible", colors.gray)
+        return
     end
+
+    if capacity <= 0 then
+        writeAt(14, y, "aucun stockage", colors.gray)
+        return
+    end
+
+    local ratio = storageRatio(used, capacity)
+    local barX = 14
+    local barWidth = math.max(8, math.min(16, math.floor(width * 0.20)))
+    drawMiniBar(barX, y, barWidth, ratio, width - 2)
+
+    local textX = barX + barWidth + 2
+    writeAt(textX, y, string.format("%5.1f%%  %s / %s",
+        ratio * 100,
+        formatBytes(used),
+        formatBytes(capacity)), colors.lightGray)
 end
 
-local function renderMEPage(now, width, height, allowRefresh)
-    local me
-
-    if allowRefresh then
-        me = refreshMEData(now, false)
-    else
-        me = meCache.data
-    end
+local function renderMEPage(now, width, height)
+    local me = meCache.data
 
     centered(3, "AE2 / ME NETWORK  v" .. PROGRAM_VERSION, colors.cyan)
 
@@ -937,10 +973,10 @@ local function renderMEPage(now, width, height, allowRefresh)
         balance and (balance >= 0 and colors.lime or colors.red) or colors.lightGray)
 
     writeAt(mid, 7, "Items       : " .. tostring(me.itemTypes or 0), colors.white)
-    writeAt(mid, 8, "Craftables  : " .. tostring(me.craftableItems or 0), colors.white)
-    writeAt(mid, 9, "Patterns    : " .. tostring(me.patternCount or 0), colors.white)
+    writeAt(mid, 8, string.format("Fluid/Chem  : %d / %d", me.fluidTypes or 0, me.chemicalTypes or 0), colors.white)
+    writeAt(mid, 9, string.format("Craft/Pat.  : %d / %d", me.craftableItems or 0, me.patternCount or 0), colors.white)
     writeAt(mid, 10, string.format("Drives/Cells: %d / %d", me.driveCount or 0, me.cellCount or 0), colors.white)
-    writeAt(mid, 11, "Crafts actifs: " .. tostring(me.taskCount or 0), colors.white)
+    writeAt(mid, 11, string.format("CPU busy    : %d / %d | jobs %d", me.busyCpuCount or 0, me.cpuCount or 0, me.taskCount or 0), colors.white)
 
     horizontalLine(12, "-", colors.gray)
     writeAt(2, 13, "STOCKAGE INTERNE", colors.cyan)
@@ -951,9 +987,16 @@ local function renderMEPage(now, width, height, allowRefresh)
 
     local externText = "Extern items : "
     if type(me.usedExternItemStorage) == "number" and type(me.maxExternItemStorage) == "number" then
-        externText = externText .. string.format("%.0f / %.0f stacks", me.usedExternItemStorage, me.maxExternItemStorage)
+        if me.maxExternItemStorage > 0 then
+            externText = externText .. string.format("%.0f / %.0f stacks", me.usedExternItemStorage, me.maxExternItemStorage)
+            if type(me.usedExternItemCount) == "number" then
+                externText = externText .. " | " .. formatCompact(me.usedExternItemCount, "items")
+            end
+        else
+            externText = externText .. "aucun stockage externe"
+        end
     else
-        externText = externText .. "n/a"
+        externText = externText .. "indisponible"
     end
     writeAt(2, 17, externText, colors.lightGray)
 
@@ -1019,7 +1062,7 @@ local function renderMEPage(now, width, height, allowRefresh)
     drawCommonFooter(width, height, footerLeft, now)
 end
 
-render = function(allowMERefresh)
+render = function()
     local now = os.epoch("utc") / 1000
 
     if now >= updateConfirmUntil then
@@ -1038,7 +1081,7 @@ render = function(allowMERefresh)
     local width, height = monitor.getSize()
 
     if activePage == "me" then
-        renderMEPage(now, width, height, allowMERefresh == true)
+        renderMEPage(now, width, height)
     else
         renderEnergyPage(now, width, height)
     end
@@ -1057,41 +1100,54 @@ end
 local function setPage(page)
     if activePage == page then return end
     activePage = page
-    render(false)
+    render()
 end
 
-render(false)
+local function uiLoop()
+    render()
 
-local timer = os.startTimer(config.refreshSeconds)
+    while true do
+        local event, p1, p2, p3 = os.pullEvent()
 
-while true do
-    local event, p1, p2, p3 = os.pullEvent()
+        if event == "dashboard_refresh" then
+            render()
 
-    if event == "timer" and p1 == timer then
-        render(true)
-        timer = os.startTimer(config.refreshSeconds)
+        elseif event == "monitor_touch" then
+            local touchedMonitor = p1
+            local x = p2
+            local y = p3
 
-    elseif event == "monitor_touch" then
-        local touchedMonitor = p1
-        local x = p2
-        local y = p3
+            if touchedMonitor == monitorName then
+                if inside(tabBounds.energy, x, y) then
+                    setPage("energy")
+                elseif inside(tabBounds.me, x, y) then
+                    setPage("me")
+                elseif inside(updateButtonBounds, x, y) and not updateInProgress then
+                    local now = os.epoch("utc") / 1000
 
-        if touchedMonitor == monitorName then
-            if inside(tabBounds.energy, x, y) then
-                setPage("energy")
-            elseif inside(tabBounds.me, x, y) then
-                setPage("me")
-            elseif inside(updateButtonBounds, x, y) and not updateInProgress then
-                local now = os.epoch("utc") / 1000
-
-                if now < updateConfirmUntil then
-                    doUpdate()
-                    render(false)
-                else
-                    updateConfirmUntil = now + 8
-                    render()
+                    if now < updateConfirmUntil then
+                        doUpdate()
+                        render()
+                    else
+                        updateConfirmUntil = now + 8
+                        render()
+                    end
                 end
             end
         end
     end
 end
+
+local function dataLoop()
+    while true do
+        local now = os.epoch("utc") / 1000
+
+        powerCache = collectPowerData(now)
+        refreshMEData(now, false, false)
+
+        os.queueEvent("dashboard_refresh")
+        sleep(config.refreshSeconds)
+    end
+end
+
+parallel.waitForAny(uiLoop, dataLoop)
