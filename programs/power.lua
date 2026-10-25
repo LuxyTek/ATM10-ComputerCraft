@@ -245,6 +245,21 @@ local function drawVerticalGauge(x, topY, bottomY, gaugeWidth, ratio)
     end
 end
 
+local function fillRow(y, leftX, rightX, bg)
+    if not monitor.isColor() then return end
+    if rightX < leftX then return end
+
+    monitor.setCursorPos(leftX, y)
+    monitor.setBackgroundColor(bg)
+    monitor.write(string.rep(" ", rightX - leftX + 1))
+    monitor.setBackgroundColor(colors.black)
+end
+
+local function drawSeparator(y, leftX, rightX)
+    if rightX < leftX then return end
+    writeAt(leftX, y, string.rep("-", rightX - leftX + 1), colors.gray, colors.black, rightX)
+end
+
 local function drawMiniBar(x, y, barWidth, ratio, rightLimit)
     if barWidth <= 0 then return end
 
@@ -407,12 +422,14 @@ while true do
         writeAt(energyX, 11, "ENERGIE", colors.cyan, nil, contentRight)
 
         local firstRow = 12
-        local maxRows = math.max(0, gaugeBottom - firstRow + 1)
+        local rowStride = 2
+        local maxRows = math.max(0, math.floor((gaugeBottom - firstRow + 2) / rowStride))
 
         for index, storage in ipairs(storages) do
             if index > maxRows then break end
 
-            local row = firstRow + index - 1
+            local row = firstRow + (index - 1) * rowStride
+            local separatorRow = row + 1
             local ratio = storage.capacity > 0 and (storage.energy / storage.capacity) or 0
             ratio = math.max(0, math.min(1, ratio))
             local pct = ratio * 100
@@ -424,10 +441,21 @@ while true do
                 rowColor = colors.orange
             end
 
-            writeAt(labelX, row, string.format("%02d", index), rowColor, nil, contentRight)
+            local rowBackground = colors.black
+            if monitor.isColor() and index % 2 == 0 then
+                rowBackground = colors.gray
+            end
+
+            fillRow(row, 1, contentRight, rowBackground)
+
+            writeAt(labelX, row, string.format("%02d", index), rowColor, rowBackground, contentRight)
             drawMiniBar(barX, row, miniBarWidth, ratio, contentRight)
-            writeAt(percentX, row, string.format("%5.1f", pct), rowColor, nil, contentRight)
-            writeAt(energyX, row, formatEnergy(storage.energy), rowColor, nil, contentRight)
+            writeAt(percentX, row, string.format("%5.1f", pct), rowColor, rowBackground, contentRight)
+            writeAt(energyX, row, formatEnergy(storage.energy), rowColor, rowBackground, contentRight)
+
+            if separatorRow <= gaugeBottom then
+                drawSeparator(separatorRow, 2, contentRight)
+            end
         end
     end
 
