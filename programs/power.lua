@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "4.3"
+local PROGRAM_VERSION = "4.4"
 local CONFIG_PATH = "/config/power.lua"
 local UPDATE_URL = "https://raw.githubusercontent.com/LuxyTek/ATM10-ComputerCraft/main/install.lua"
 local UPDATE_TEMP = "/.atm10cc_update.lua"
