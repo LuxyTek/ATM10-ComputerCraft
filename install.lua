@@ -18,6 +18,19 @@ local function ensureParent(path)
     end
 end
 
+local function validateLua(remote, body)
+    if not string.match(remote, "%.lua$") then
+        return true
+    end
+
+    local chunk, err = load(body, "@" .. remote)
+    if not chunk then
+        return false, err
+    end
+
+    return true
+end
+
 local function download(remote, localPath, overwrite)
     ensureParent(localPath)
 
@@ -36,14 +49,63 @@ local function download(remote, localPath, overwrite)
     local body = response.readAll()
     response.close()
 
-    local file = fs.open(localPath, "w")
+    if not body or #body == 0 then
+        printError("Fichier vide : " .. remote)
+        return false
+    end
+
+    local valid, validationError = validateLua(remote, body)
+    if not valid then
+        printError("Lua invalide : " .. remote)
+        if validationError then printError(validationError) end
+        return false
+    end
+
+    local tempPath = localPath .. ".new"
+    local backupPath = localPath .. ".bak"
+
+    if fs.exists(tempPath) then fs.delete(tempPath) end
+
+    local file = fs.open(tempPath, "w")
     if not file then
-        printError("Impossible d'ecrire : " .. localPath)
+        printError("Impossible d'ecrire : " .. tempPath)
         return false
     end
 
     file.write(body)
     file.close()
+
+    if fs.exists(backupPath) then fs.delete(backupPath) end
+
+    if fs.exists(localPath) then
+        local backupOK, backupError = pcall(fs.copy, localPath, backupPath)
+        if not backupOK then
+            fs.delete(tempPath)
+            printError("Backup impossible : " .. localPath)
+            if backupError then printError(backupError) end
+            return false
+        end
+    end
+
+    local replaceOK, replaceError = pcall(function()
+        if fs.exists(localPath) then fs.delete(localPath) end
+        fs.move(tempPath, localPath)
+    end)
+
+    if not replaceOK then
+        if fs.exists(backupPath) then
+            if fs.exists(localPath) then fs.delete(localPath) end
+            fs.copy(backupPath, localPath)
+        end
+        if fs.exists(tempPath) then fs.delete(tempPath) end
+
+        printError("Remplacement impossible : " .. localPath)
+        if replaceError then printError(replaceError) end
+        return false
+    end
+
+    if fs.exists(backupPath) then fs.delete(backupPath) end
+
     print("Installe : " .. localPath)
     return true
 end
