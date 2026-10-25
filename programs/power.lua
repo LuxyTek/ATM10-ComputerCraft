@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "5.3"
+local PROGRAM_VERSION = "5.4"
 local CONFIG_PATH = "/config/power.lua"
 local UPDATE_URL = "https://raw.githubusercontent.com/LuxyTek/ATM10-ComputerCraft/main/programs/power.lua"
 local UPDATE_TEMP = "/programs/power.new"
@@ -451,7 +451,7 @@ local function normalizeCells(cells)
     for _, cell in pairs(cells or {}) do
         if type(cell) == "table" then
             local used = tonumber(cell.usedBytes or cell.used)
-            local capacity = tonumber(cell.bytes or cell.capacity or cell.totalBytes)
+            local capacity = tonumber(cell.maxBytes or cell.bytes or cell.capacity or cell.totalBytes)
             local ratio = nil
 
             if used and capacity and capacity > 0 then
@@ -460,6 +460,8 @@ local function normalizeCells(cells)
 
             table.insert(result, {
                 type = shortCellType(cell),
+                itemName = type(cell.item) == "table" and cell.item.name or nil,
+                maxTypes = tonumber(cell.maxTypes or cell.totalBytes),
                 used = used,
                 capacity = capacity,
                 ratio = ratio,
@@ -568,6 +570,17 @@ local function refreshMEData(now, forceFast, forceHeavy)
         data.usedExternItemStorage = select(1, callFirst(bridge, { "getUsedExternItemStorage" }))
         data.usedExternItemCount = select(1, callFirst(bridge, { "getUsedExternItemCount" }))
 
+        meCache.lastFastRefresh = now
+    end
+
+    if doHeavy then
+        -- These calls can return very large tables on a mature ME network.
+        -- Keep them out of the fast polling path.
+        local items = callList(bridge, "getItems", "listItems")
+        local fluids = callList(bridge, "getFluids", "listFluids")
+        local chemicals = callList(bridge, "getChemicals", "listChemicals")
+        local craftables = callList(bridge, "getCraftableItems", "listCraftableItems")
+        local patterns = callNoArgList(bridge, "getPatterns", nil)
         local cells = callNoArgList(bridge, "getCells", "listCells")
         local drives = callNoArgList(bridge, "getDrives", nil)
         local tasks = callNoArgList(bridge, "getCraftingTasks", nil)
@@ -596,17 +609,6 @@ local function refreshMEData(now, forceFast, forceHeavy)
             end
         end
         data.cellAlerts = alerts
-        meCache.lastFastRefresh = now
-    end
-
-    if doHeavy then
-        -- These calls can return very large tables on a mature ME network.
-        -- Keep them out of the fast polling path.
-        local items = callList(bridge, "getItems", "listItems")
-        local fluids = callList(bridge, "getFluids", "listFluids")
-        local chemicals = callList(bridge, "getChemicals", "listChemicals")
-        local craftables = callList(bridge, "getCraftableItems", "listCraftableItems")
-        local patterns = callNoArgList(bridge, "getPatterns", nil)
 
         data.itemTypes = countEntries(items)
         data.fluidTypes = countEntries(fluids)
@@ -1034,7 +1036,13 @@ local function renderMEPage(now, width, height)
             byteText = " " .. formatBytes(cell.used) .. "/" .. formatBytes(cell.capacity)
         end
 
-        writeAt(2, row, string.format("%02d %-5s %s%s", index, cell.type, usageText, byteText), color, nil, cellRight)
+        local sizeText = ""
+        if cell.capacity then
+            sizeText = formatBytes(cell.capacity)
+        end
+
+        writeAt(2, row, string.format("%02d %-5s %-8s %s%s",
+            index, cell.type, sizeText, usageText, byteText), color, nil, cellRight)
     end
 
     if #me.cells == 0 then
@@ -1057,7 +1065,7 @@ local function renderMEPage(now, width, height)
         me.bridgeName or "?",
         me.cellCount or 0,
         me.driveCount or 0,
-        tostring(config.meRefreshSeconds))
+        tostring(config.meHeavyRefreshSeconds))
 
     drawCommonFooter(width, height, footerLeft, now)
 end
