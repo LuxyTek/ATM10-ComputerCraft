@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "5.9"
+local PROGRAM_VERSION = "6.0"
 local CONFIG_PATH = "/config/power.lua"
 local UPDATE_URL = "https://raw.githubusercontent.com/LuxyTek/ATM10-ComputerCraft/main/programs/power.lua"
 local UPDATE_TEMP = "/programs/power.new"
@@ -182,6 +182,37 @@ local function drawMiniBar(x, y, barWidth, ratio, rightLimit)
         monitor.write(string.rep("#", filled) .. string.rep("-", barWidth - filled))
     end
 end
+
+local function drawUsageBar(x, y, barWidth, ratio, rightLimit)
+    if barWidth <= 0 then return end
+
+    local maxWidth = (rightLimit or select(1, monitor.getSize())) - x + 1
+    barWidth = math.max(1, math.min(barWidth, maxWidth))
+    ratio = math.max(0, math.min(1, ratio or 0))
+
+    local filled = math.floor(barWidth * ratio + 0.5)
+    local barColor = colors.lime
+
+    if ratio >= 0.90 then
+        barColor = colors.red
+    elseif ratio >= 0.75 then
+        barColor = colors.orange
+    end
+
+    monitor.setCursorPos(x, y)
+
+    if monitor.isColor() then
+        monitor.setBackgroundColor(barColor)
+        monitor.write(string.rep(" ", filled))
+        monitor.setBackgroundColor(colors.gray)
+        monitor.write(string.rep(" ", barWidth - filled))
+        monitor.setBackgroundColor(colors.black)
+        monitor.setTextColor(colors.white)
+    else
+        monitor.write(string.rep("#", filled) .. string.rep("-", barWidth - filled))
+    end
+end
+
 
 local function drawVerticalGauge(x, topY, bottomY, gaugeWidth, ratio)
     local height = bottomY - topY + 1
@@ -749,7 +780,7 @@ local function refreshMEData(now, forceFast, forceHeavy)
     return data
 end
 
-local activePage = "energy"
+local activePage = "dashboard"
 local tabBounds = {}
 local updateButtonBounds = nil
 local updateConfirmUntil = 0
@@ -760,11 +791,13 @@ local updateInProgress = false
 local render
 
 local function drawTabs(width, height)
+    local dashboardLabel = "[ DASHBOARD ]"
     local energyLabel = "[ ENERGIE ]"
     local meLabel = "[ ME / AE2 ]"
 
     local x1 = 2
-    local x2 = x1 + #energyLabel + 2
+    local x2 = x1 + #dashboardLabel + 2
+    local x3 = x2 + #energyLabel + 2
     local y = height
 
     local function tab(label, x, active)
@@ -774,8 +807,9 @@ local function drawTabs(width, height)
         return { x1 = x, x2 = x + #label - 1, y1 = y, y2 = y }
     end
 
-    tabBounds.energy = tab(energyLabel, x1, activePage == "energy")
-    tabBounds.me = tab(meLabel, x2, activePage == "me")
+    tabBounds.dashboard = tab(dashboardLabel, x1, activePage == "dashboard")
+    tabBounds.energy = tab(energyLabel, x2, activePage == "energy")
+    tabBounds.me = tab(meLabel, x3, activePage == "me")
 end
 
 local function drawUpdateButton(width, height, now)
@@ -903,6 +937,201 @@ local function drawCommonFooter(width, height, leftText, now)
 end
 
 local powerCache = nil
+
+local function renderDashboardPage(now, width, height)
+    local power = powerCache
+    local me = meCache.data
+
+    centered(2, "SYSTEM DASHBOARD  v" .. PROGRAM_VERSION, colors.cyan)
+
+    local powerReady = power ~= nil and power.totalCapacity and power.totalCapacity > 0
+    local meReady = me ~= nil and me.bridgeFound == true
+
+    local powerFill = powerReady and power.fill or 0
+    local storageRatioValue = nil
+    local storageFree = nil
+
+    if meReady
+        and type(me.usedItemStorage) == "number"
+        and type(me.maxItemStorage) == "number"
+        and me.maxItemStorage > 0 then
+        storageRatioValue = math.max(0, math.min(1, me.usedItemStorage / me.maxItemStorage))
+        storageFree = math.max(0, me.maxItemStorage - me.usedItemStorage)
+    end
+
+    local warnings = {}
+
+    if not powerReady then
+        table.insert(warnings, "ENERGIE INDISPONIBLE")
+    elseif powerFill <= config.lowThreshold then
+        table.insert(warnings, "ENERGIE BASSE")
+    end
+
+    if not meReady then
+        table.insert(warnings, "RESEAU ME INDISPONIBLE")
+    elseif not me.online then
+        table.insert(warnings, "RESEAU ME OFFLINE")
+    end
+
+    if storageRatioValue and storageRatioValue >= 0.90 then
+        table.insert(warnings, "STOCKAGE ME >90%")
+    end
+
+    if meReady and (me.cellAlerts or 0) > 0 then
+        table.insert(warnings, tostring(me.cellAlerts) .. " CELL(S) >90%")
+    end
+
+    local overallText = #warnings == 0 and "SYSTEME OK" or "ATTENTION"
+    local overallColor = #warnings == 0 and colors.lime or colors.orange
+    centered(4, overallText, overallColor)
+
+    local split = math.floor(width / 2)
+    local leftX = 3
+    local rightX = split + 3
+    local leftRight = split - 2
+    local rightRight = width - 2
+
+    -- Energie globale
+    writeAt(leftX, 7, "ENERGIE GLOBALE", colors.cyan, nil, leftRight)
+
+    if powerReady then
+        writeAt(leftX, 9,
+            formatEnergy(power.totalEnergy) .. " / " .. formatEnergy(power.totalCapacity),
+            colors.white, nil, leftRight)
+
+        local energyBarWidth = math.max(14, math.min(28, leftRight - leftX - 12))
+        drawMiniBar(leftX, 11, energyBarWidth, powerFill, leftRight)
+        writeAt(leftX + energyBarWidth + 2, 11,
+            string.format("%5.1f%%", powerFill * 100),
+            powerFill <= config.lowThreshold and colors.red
+                or (powerFill <= config.warningThreshold and colors.orange or colors.lime),
+            nil, leftRight)
+
+        local state = "STABLE"
+        local stateColor = colors.yellow
+
+        if power.averageNet then
+            if power.averageNet > 1 then
+                state = "CHARGE  +" .. formatEnergy(power.averageNet) .. "/t"
+                stateColor = colors.lime
+            elseif power.averageNet < -1 then
+                state = "DECHARGE  " .. formatEnergy(power.averageNet) .. "/t"
+                stateColor = colors.red
+            end
+        end
+
+        writeAt(leftX, 13, "Etat : " .. state, stateColor, nil, leftRight)
+        writeAt(leftX, 15, "Cubes : " .. tostring(#(power.storages or {})), colors.lightGray, nil, leftRight)
+    else
+        writeAt(leftX, 9, "Donnees indisponibles", colors.red, nil, leftRight)
+    end
+
+    -- ME / stockage
+    writeAt(rightX, 7, "STOCKAGE ME", colors.cyan, nil, rightRight)
+
+    if meReady then
+        local meState = me.online and "ONLINE" or "OFFLINE"
+        writeAt(rightX, 9, "Reseau : " .. meState,
+            me.online and colors.lime or colors.red, nil, rightRight)
+
+        if storageRatioValue then
+            local storageBarWidth = math.max(14, math.min(28, rightRight - rightX - 12))
+            drawUsageBar(rightX, 11, storageBarWidth, storageRatioValue, rightRight)
+            writeAt(rightX + storageBarWidth + 2, 11,
+                string.format("%5.1f%%", storageRatioValue * 100),
+                storageRatioValue >= 0.90 and colors.red
+                    or (storageRatioValue >= 0.75 and colors.orange or colors.lime),
+                nil, rightRight)
+
+            writeAt(rightX, 13,
+                "Libre : " .. formatBytes(storageFree) .. " / " .. formatBytes(me.maxItemStorage),
+                colors.lime, nil, rightRight)
+        else
+            writeAt(rightX, 11, "Stockage : indisponible", colors.gray, nil, rightRight)
+        end
+
+        writeAt(rightX, 15,
+            string.format("Drives : %d   Cells : %d", me.driveCount or 0, me.cellCount or 0),
+            colors.lightGray, nil, rightRight)
+    else
+        writeAt(rightX, 9, "ME Bridge indisponible", colors.red, nil, rightRight)
+    end
+
+    horizontalLine(18, "-", colors.gray)
+
+    -- AE2 power / activity
+    writeAt(leftX, 20, "RESEAU AE2", colors.cyan, nil, leftRight)
+
+    if meReady then
+        local aeRatio = nil
+        if type(me.storedEnergy) == "number"
+            and type(me.energyCapacity) == "number"
+            and me.energyCapacity > 0 then
+            aeRatio = math.max(0, math.min(1, me.storedEnergy / me.energyCapacity))
+        end
+
+        writeAt(leftX, 22,
+            "AE : " .. formatAE(me.storedEnergy) .. " / " .. formatAE(me.energyCapacity),
+            colors.white, nil, leftRight)
+
+        if aeRatio then
+            local aeBarWidth = math.max(14, math.min(28, leftRight - leftX - 12))
+            drawMiniBar(leftX, 24, aeBarWidth, aeRatio, leftRight)
+            writeAt(leftX + aeBarWidth + 2, 24,
+                string.format("%5.1f%%", aeRatio * 100),
+                aeRatio <= 0.25 and colors.red or colors.lime,
+                nil, leftRight)
+        end
+
+        writeAt(leftX, 26,
+            "Usage : " .. (me.energyUsage and (formatAE(me.energyUsage) .. "/t") or "--"),
+            colors.lightGray, nil, leftRight)
+    else
+        writeAt(leftX, 22, "Donnees indisponibles", colors.gray, nil, leftRight)
+    end
+
+    writeAt(rightX, 20, "ACTIVITE / ALERTES", colors.cyan, nil, rightRight)
+
+    if meReady then
+        writeAt(rightX, 22,
+            string.format("Items : %d types", me.itemTypes or 0),
+            colors.white, nil, rightRight)
+
+        writeAt(rightX, 24,
+            string.format("Crafts : %d   CPU busy : %d/%d",
+                me.taskCount or 0, me.busyCpuCount or 0, me.cpuCount or 0),
+            colors.white, nil, rightRight)
+
+        local alertText = (me.cellAlerts or 0) > 0
+            and (tostring(me.cellAlerts) .. " cell(s) >90%")
+            or "Cells : OK"
+
+        writeAt(rightX, 26, alertText,
+            (me.cellAlerts or 0) > 0 and colors.orange or colors.lime,
+            nil, rightRight)
+    else
+        writeAt(rightX, 22, "Donnees indisponibles", colors.gray, nil, rightRight)
+    end
+
+    horizontalLine(29, "-", colors.gray)
+    writeAt(3, 31, "ALERTES", colors.cyan)
+
+    if #warnings == 0 then
+        writeAt(3, 33, "Aucune alerte active", colors.lime)
+    else
+        local maxAlerts = math.min(#warnings, math.max(1, height - 36))
+        for index = 1, maxAlerts do
+            writeAt(3, 32 + index, "! " .. warnings[index], colors.orange)
+        end
+    end
+
+    local footerText = string.format("Power:%s | ME:%s | Uptime:%s",
+        powerReady and "OK" or "--",
+        meReady and (me.online and "OK" or "OFF") or "--",
+        formatDuration(now - sessionStart))
+
+    drawCommonFooter(width, height, footerText, now)
+end
 
 local function renderEnergyPage(now, width, height)
     local power = powerCache or {
@@ -1327,7 +1556,9 @@ render = function()
 
     local width, height = monitor.getSize()
 
-    if activePage == "me" then
+    if activePage == "dashboard" then
+        renderDashboardPage(now, width, height)
+    elseif activePage == "me" then
         renderMEPage(now, width, height)
     else
         renderEnergyPage(now, width, height)
@@ -1365,7 +1596,9 @@ local function uiLoop()
             local y = p3
 
             if touchedMonitor == monitorName then
-                if inside(tabBounds.energy, x, y) then
+                if inside(tabBounds.dashboard, x, y) then
+                    setPage("dashboard")
+                elseif inside(tabBounds.energy, x, y) then
                     setPage("energy")
                 elseif inside(tabBounds.me, x, y) then
                     setPage("me")
