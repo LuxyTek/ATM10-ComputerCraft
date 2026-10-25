@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "5.0"
+local PROGRAM_VERSION = "5.1"
 local CONFIG_PATH = "/config/power.lua"
 local UPDATE_URL = "https://raw.githubusercontent.com/LuxyTek/ATM10-ComputerCraft/main/programs/power.lua"
 local UPDATE_TEMP = "/programs/power.new"
@@ -55,8 +55,11 @@ local function getMonitor()
     error("Aucun monitor detecte sur le reseau CC:Tweaked")
 end
 
-local monitor, monitorName = getMonitor()
-monitor.setTextScale(config.textScale)
+local physicalMonitor, monitorName = getMonitor()
+physicalMonitor.setTextScale(config.textScale)
+
+local monitorWidth, monitorHeight = physicalMonitor.getSize()
+local monitor = window.create(physicalMonitor, 1, 1, monitorWidth, monitorHeight, false)
 
 local function formatCompact(value, unit)
     if value == nil then return "--" end
@@ -608,26 +611,23 @@ local updateInProgress = false
 
 local render
 
-local function drawTabs(width)
+local function drawTabs(width, height)
     local energyLabel = "[ ENERGIE ]"
     local meLabel = "[ ME / AE2 ]"
 
     local x1 = 2
     local x2 = x1 + #energyLabel + 2
+    local y = height
 
     local function tab(label, x, active)
         local fg = active and colors.black or colors.white
         local bg = active and colors.cyan or colors.gray
-        writeAt(x, 1, label, fg, bg)
-        return { x1 = x, x2 = x + #label - 1, y = 1 }
+        writeAt(x, y, label, fg, bg)
+        return { x1 = x, x2 = x + #label - 1, y1 = y, y2 = y }
     end
 
     tabBounds.energy = tab(energyLabel, x1, activePage == "energy")
     tabBounds.me = tab(meLabel, x2, activePage == "me")
-
-    local version = "v" .. PROGRAM_VERSION
-    writeAt(math.max(2, width - #version - 1), 1, version, colors.lightGray, colors.black)
-    horizontalLine(2, "=", colors.gray)
 end
 
 local function drawUpdateButton(width, height, now)
@@ -651,7 +651,7 @@ local function drawUpdateButton(width, height, now)
 
     local x = math.max(2, width - #label - 1)
     writeAt(x, height, label, fg, bg)
-    updateButtonBounds = { x1 = x, x2 = x + #label - 1, y = height }
+    updateButtonBounds = { x1 = x, x2 = x + #label - 1, y1 = height, y2 = height }
 end
 
 local function failUpdate(message)
@@ -739,14 +739,17 @@ end
 local function drawCommonFooter(width, height, leftText, now)
     horizontalLine(height - 2, "-", colors.gray)
 
+    writeAt(2, height - 1, leftText or "", colors.lightGray)
+
     if updateMessage then
-        writeAt(2, height, leftText or "", colors.lightGray)
         local msgX = math.max(2, width - #updateMessage - 1)
-        writeAt(msgX, height, updateMessage, colors.red)
+        writeAt(msgX, height - 1, updateMessage, colors.red)
         updateButtonBounds = nil
-    else
-        local buttonReserve = now < updateConfirmUntil and 15 or 10
-        writeAt(2, height, leftText or "", colors.lightGray, colors.black, width - buttonReserve)
+    end
+
+    drawTabs(width, height)
+
+    if not updateMessage then
         drawUpdateButton(width, height, now)
     end
 end
@@ -754,7 +757,7 @@ end
 local function renderEnergyPage(now, width, height)
     local power = collectPowerData(now)
 
-    centered(3, "MEKANISM POWER", colors.cyan)
+    centered(3, "MEKANISM POWER  v" .. PROGRAM_VERSION, colors.cyan)
     centered(5, formatEnergy(power.totalEnergy) .. " / " .. formatEnergy(power.totalCapacity), colors.white)
 
     local stateText = "CALCUL..."
@@ -848,10 +851,13 @@ local function renderEnergyPage(now, width, height)
     local peakText = peakConsumption < 0 and ("Pic conso : " .. formatEnergy(peakConsumption) .. "/t") or "Pic conso : --"
     local uptimeText = "Uptime : " .. formatDuration(now - sessionStart)
 
-    writeAt(2, height - 1, peakText, colors.lightGray)
-    writeAt(math.max(2, width - #uptimeText), height - 1, uptimeText, colors.lightGray)
+    local footerText = string.format("%d stockage%s | %s | %s",
+        #power.storages,
+        #power.storages > 1 and "s" or "",
+        peakText,
+        uptimeText)
 
-    drawCommonFooter(width, height, string.format("%d stockage%s", #power.storages, #power.storages > 1 and "s" or ""), now)
+    drawCommonFooter(width, height, footerText, now)
 end
 
 local function storageRatio(used, capacity)
@@ -883,7 +889,7 @@ end
 local function renderMEPage(now, width, height)
     local me = refreshMEData(now, false)
 
-    centered(3, "AE2 / ME NETWORK", colors.cyan)
+    centered(3, "AE2 / ME NETWORK  v" .. PROGRAM_VERSION, colors.cyan)
 
     if not me.bridgeFound then
         centered(6, "ME BRIDGE INTROUVABLE", colors.red)
@@ -1020,26 +1026,28 @@ render = function()
         updateMessage = nil
     end
 
+    monitor.setVisible(false)
     monitor.setBackgroundColor(colors.black)
     monitor.setTextColor(colors.white)
     monitor.clear()
 
     local width, height = monitor.getSize()
 
-    drawTabs(width)
-
     if activePage == "me" then
         renderMEPage(now, width, height)
     else
         renderEnergyPage(now, width, height)
     end
+
+    monitor.setVisible(true)
 end
 
 local function inside(bounds, x, y)
     return bounds
-        and y == bounds.y
         and x >= bounds.x1
         and x <= bounds.x2
+        and y >= bounds.y1
+        and y <= bounds.y2
 end
 
 local function setPage(page)
