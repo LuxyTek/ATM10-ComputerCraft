@@ -1,4 +1,7 @@
+local PROGRAM_VERSION = "4.3"
 local CONFIG_PATH = "/config/power.lua"
+local UPDATE_URL = "https://raw.githubusercontent.com/LuxyTek/ATM10-ComputerCraft/main/install.lua"
+local UPDATE_TEMP = "/.atm10cc_update.lua"
 
 local defaults = {
     title = "MEKANISM POWER",
@@ -290,6 +293,10 @@ local previousEnergy = nil
 local previousTime = nil
 local deltaSamples = {}
 local peakConsumption = 0
+local updateConfirmUntil = 0
+local updateMessage = nil
+local updateMessageUntil = 0
+local buttonBounds = nil
 
 local function updateTrend(now, netPerTick)
     if netPerTick then
@@ -316,7 +323,81 @@ local function updateTrend(now, netPerTick)
     return total / #deltaSamples
 end
 
-while true do
+local function drawUpdateButton(width, height, now)
+    local confirming = now < updateConfirmUntil
+    local label = confirming and "[ CONFIRMER ]" or "[ MAJ ]"
+    local buttonWidth = #label
+    local x = math.max(2, width - buttonWidth - 1)
+    local y = height
+
+    local fg = confirming and colors.black or colors.white
+    local bg = confirming and colors.orange or colors.blue
+
+    writeAt(x, y, label, fg, bg)
+    buttonBounds = { x1 = x, x2 = x + buttonWidth - 1, y = y }
+end
+
+local function doUpdate()
+    monitor.setBackgroundColor(colors.black)
+    monitor.setTextColor(colors.white)
+    monitor.clear()
+    centered(5, "MISE A JOUR...", colors.yellow)
+    centered(7, "Telechargement GitHub", colors.lightGray)
+
+    if fs.exists(UPDATE_TEMP) then
+        fs.delete(UPDATE_TEMP)
+    end
+
+    local response, err = http.get(UPDATE_URL)
+    if not response then
+        updateMessage = "ECHEC MAJ"
+        updateMessageUntil = os.epoch("utc") / 1000 + 8
+        updateConfirmUntil = 0
+        return false, err
+    end
+
+    local body = response.readAll()
+    response.close()
+
+    if not body or #body < 100 then
+        updateMessage = "FICHIER MAJ INVALIDE"
+        updateMessageUntil = os.epoch("utc") / 1000 + 8
+        updateConfirmUntil = 0
+        return false, "install.lua invalide"
+    end
+
+    local file = fs.open(UPDATE_TEMP, "w")
+    if not file then
+        updateMessage = "ERREUR ECRITURE"
+        updateMessageUntil = os.epoch("utc") / 1000 + 8
+        updateConfirmUntil = 0
+        return false, "Impossible d'ecrire le fichier temporaire"
+    end
+
+    file.write(body)
+    file.close()
+
+    centered(9, "Installation...", colors.cyan)
+    local ok = shell.run(UPDATE_TEMP)
+
+    if fs.exists(UPDATE_TEMP) then
+        fs.delete(UPDATE_TEMP)
+    end
+
+    if not ok then
+        updateMessage = "ECHEC INSTALLATION"
+        updateMessageUntil = os.epoch("utc") / 1000 + 8
+        updateConfirmUntil = 0
+        return false, "Installateur en erreur"
+    end
+
+    centered(11, "MAJ OK - REDEMARRAGE", colors.lime)
+    sleep(1)
+    os.reboot()
+    return true
+end
+
+local function collectData(now)
     local storages = {}
     local totalEnergy = 0
     local totalCapacity = 0
@@ -335,9 +416,7 @@ while true do
         fill = math.max(0, math.min(1, totalEnergy / totalCapacity))
     end
 
-    local now = os.epoch("utc") / 1000
     local netPerTick = nil
-
     if previousEnergy and previousTime and now > previousTime then
         netPerTick = (totalEnergy - previousEnergy) / ((now - previousTime) * 20)
     end
@@ -345,7 +424,20 @@ while true do
     previousEnergy = totalEnergy
     previousTime = now
 
-    local averageNet = updateTrend(now, netPerTick)
+    return storages, totalEnergy, totalCapacity, fill, updateTrend(now, netPerTick)
+end
+
+local function render()
+    local now = os.epoch("utc") / 1000
+
+    if now >= updateConfirmUntil then
+        updateConfirmUntil = 0
+    end
+    if updateMessage and now >= updateMessageUntil then
+        updateMessage = nil
+    end
+
+    local storages, totalEnergy, totalCapacity, fill, averageNet = collectData(now)
 
     monitor.setBackgroundColor(colors.black)
     monitor.setTextColor(colors.white)
@@ -353,7 +445,7 @@ while true do
 
     local width, height = monitor.getSize()
 
-    centered(1, config.title, colors.cyan)
+    centered(1, config.title .. "  v" .. PROGRAM_VERSION, colors.cyan)
     horizontalLine(2, "=", colors.gray)
 
     centered(4, formatEnergy(totalEnergy) .. " / " .. formatEnergy(totalCapacity), colors.white)
@@ -370,13 +462,11 @@ while true do
             stateText = "CHARGE"
             stateColor = colors.lime
             local remaining = math.max(0, totalCapacity - totalEnergy)
-            local secondsToFull = remaining / (averageNet * 20)
-            etaText = "Plein dans : " .. formatDuration(secondsToFull)
+            etaText = "Plein dans : " .. formatDuration(remaining / (averageNet * 20))
         elseif averageNet < -stableLimit then
             stateText = "DECHARGE"
             stateColor = colors.red
-            local secondsRemaining = totalEnergy / ((-averageNet) * 20)
-            etaText = "Autonomie : " .. formatDuration(secondsRemaining)
+            etaText = "Autonomie : " .. formatDuration(totalEnergy / ((-averageNet) * 20))
         else
             stateText = "STABLE"
             stateColor = colors.yellow
@@ -469,8 +559,52 @@ while true do
             #storages,
             #storages > 1 and "s" or "",
             config.refreshSeconds)
-        centered(height, footer, colors.lightGray)
-    end
 
-    sleep(config.refreshSeconds)
+        writeAt(2, height, footer, colors.lightGray)
+
+        if updateMessage then
+            local msgX = math.max(2, width - #updateMessage - 1)
+            writeAt(msgX, height, updateMessage, colors.red)
+            buttonBounds = nil
+        else
+            drawUpdateButton(width, height, now)
+        end
+    end
+end
+
+local function isInsideButton(x, y)
+    return buttonBounds
+        and y == buttonBounds.y
+        and x >= buttonBounds.x1
+        and x <= buttonBounds.x2
+end
+
+render()
+
+local timer = os.startTimer(config.refreshSeconds)
+
+while true do
+    local event, p1, p2, p3 = os.pullEvent()
+
+    if event == "timer" and p1 == timer then
+        render()
+        timer = os.startTimer(config.refreshSeconds)
+
+    elseif event == "monitor_touch" then
+        local touchedMonitor = p1
+        local x = p2
+        local y = p3
+
+        if touchedMonitor == monitorName and isInsideButton(x, y) then
+            local now = os.epoch("utc") / 1000
+
+            if now < updateConfirmUntil then
+                doUpdate()
+                render()
+            else
+                updateConfirmUntil = now + 8
+                render()
+            end
+        end
+    end
 end
