@@ -166,14 +166,12 @@ local function horizontalLine(y, char, fg)
     writeAt(1, y, string.rep(char or "-", width), fg)
 end
 
-local function drawBar(y, ratio)
-    local width, height = monitor.getSize()
-    if y < 1 or y > height then return end
+local function drawVerticalGauge(x, topY, bottomY, gaugeWidth, ratio)
+    local height = bottomY - topY + 1
+    if height <= 0 or gaugeWidth <= 0 then return end
 
-    local x = 3
-    local barWidth = math.max(1, width - 4)
-    local filled = math.floor(barWidth * ratio + 0.5)
-    filled = math.max(0, math.min(barWidth, filled))
+    local filledRows = math.floor(height * ratio + 0.5)
+    filledRows = math.max(0, math.min(height, filledRows))
 
     local barColor = colors.lime
     if ratio <= config.lowThreshold then
@@ -182,16 +180,44 @@ local function drawBar(y, ratio)
         barColor = colors.orange
     end
 
-    monitor.setCursorPos(x, y)
+    -- Cadre / fond de jauge.
+    for row = 0, height - 1 do
+        local y = topY + row
+        local fromBottom = height - row
+        local isFilled = fromBottom <= filledRows
+
+        monitor.setCursorPos(x, y)
+        if monitor.isColor() then
+            monitor.setBackgroundColor(isFilled and barColor or colors.gray)
+            monitor.write(string.rep(" ", gaugeWidth))
+        else
+            monitor.write(string.rep(isFilled and "#" or ".", gaugeWidth))
+        end
+    end
+
+    -- Pourcentage global au centre de la jauge.
+    local percentText = string.format("%.1f%%", ratio * 100)
+    local percentY = math.floor((topY + bottomY) / 2)
+    local percentX = x + math.max(0, math.floor((gaugeWidth - #percentText) / 2))
 
     if monitor.isColor() then
-        monitor.setBackgroundColor(barColor)
-        monitor.write(string.rep(" ", filled))
-        monitor.setBackgroundColor(colors.gray)
-        monitor.write(string.rep(" ", barWidth - filled))
+        local rowsFromBottom = bottomY - percentY + 1
+        local percentOnFilled = rowsFromBottom <= filledRows
+        monitor.setBackgroundColor(percentOnFilled and barColor or colors.gray)
+
+        if percentOnFilled and barColor ~= colors.red then
+            monitor.setTextColor(colors.black)
+        else
+            monitor.setTextColor(colors.white)
+        end
+    end
+
+    monitor.setCursorPos(percentX, percentY)
+    monitor.write(percentText)
+
+    if monitor.isColor() then
         monitor.setBackgroundColor(colors.black)
-    else
-        monitor.write(string.rep("#", filled) .. string.rep("-", barWidth - filled))
+        monitor.setTextColor(colors.white)
     end
 end
 
@@ -240,7 +266,6 @@ while true do
     -- Main storage view
     centered(4, string.format("%.1f %%", fill * 100), colors.white)
     centered(5, formatEnergy(totalEnergy) .. " / " .. formatEnergy(totalCapacity), colors.lightGray)
-    drawBar(7, fill)
 
     -- Network state
     local stateText = "CALCUL..."
@@ -269,18 +294,28 @@ while true do
 
     horizontalLine(12, "-", colors.gray)
 
-    -- Device table
+    -- Device table + vertical energy gauge.
+    local gaugeWidth = math.max(7, math.min(10, math.floor(width * 0.14)))
+    local gaugeX = width - gaugeWidth - 1
+    local gaugeTop = 13
+    local gaugeBottom = math.max(gaugeTop, height - 2)
+    local contentRight = gaugeX - 2
+
+    writeAt(gaugeX, 12, "ENERGIE", colors.cyan)
+
     if #storages == 0 then
-        centered(14, "AUCUN STOCKAGE DETECTE", colors.red)
-        centered(15, "Commande : peripherals", colors.lightGray)
+        writeAt(2, 14, "AUCUN STOCKAGE DETECTE", colors.red)
+        writeAt(2, 15, "Commande : peripherals", colors.lightGray)
     elseif config.showDevices then
+        local chargeX = math.max(11, math.floor(contentRight * 0.30))
+        local energyX = math.max(chargeX + 11, math.floor(contentRight * 0.56))
+
         writeAt(2, 13, "CUBE", colors.cyan)
-        writeAt(math.max(10, math.floor(width * 0.30)), 13, "CHARGE", colors.cyan)
-        writeAt(math.max(22, math.floor(width * 0.52)), 13, "ENERGIE", colors.cyan)
+        writeAt(chargeX, 13, "CHARGE", colors.cyan)
+        writeAt(energyX, 13, "ENERGIE", colors.cyan)
 
         local firstRow = 14
-        local footerRow = height
-        local maxRows = math.max(0, footerRow - firstRow - 1)
+        local maxRows = math.max(0, gaugeBottom - firstRow + 1)
 
         for index, storage in ipairs(storages) do
             if index > maxRows then break end
@@ -296,10 +331,12 @@ while true do
             end
 
             writeAt(2, row, string.format("CUBE %02d", index), rowColor)
-            writeAt(math.max(10, math.floor(width * 0.30)), row, string.format("%5.1f %%", pct), rowColor)
-            writeAt(math.max(22, math.floor(width * 0.52)), row, formatEnergy(storage.energy), rowColor)
+            writeAt(chargeX, row, string.format("%5.1f %%", pct), rowColor)
+            writeAt(energyX, row, formatEnergy(storage.energy), rowColor)
         end
     end
+
+    drawVerticalGauge(gaugeX, gaugeTop, gaugeBottom, gaugeWidth, fill)
 
     -- Footer
     if height >= 3 then
