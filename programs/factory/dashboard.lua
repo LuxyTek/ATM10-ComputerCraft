@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.1.0"
+local PROGRAM_VERSION = "0.1.1"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_dashboard.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -235,7 +235,9 @@ render = function()
     for _, module in ipairs(list) do
         local net = networkState(module, now)
         if net == "ONLINE" then onlineCount = onlineCount + 1 end
-        if module.health == "FAULT" then faultCount = faultCount + 1 end
+        if net ~= "OFFLINE" and module.health == "FAULT" then
+            faultCount = faultCount + 1
+        end
     end
 
     writeAt(2, 3, ("MODULES %d  ONLINE %d"):format(#list, onlineCount), colors.white)
@@ -248,47 +250,83 @@ render = function()
 
     if modemCount == 0 then
         centered(5, "AUCUN MODEM REDNET", colors.red)
+
     elseif #list == 0 then
         centered(6, "EN ATTENTE DE MODULES...", colors.orange)
         centered(8, "protocol: " .. STATUS_PROTOCOL, colors.lightGray)
+
     else
-        local y = 5
+        writeAt(2, 5, "MODULE", colors.gray)
+        writeAt(20, 5, "NETWORK", colors.gray)
+        writeAt(31, 5, "MODE", colors.gray)
+        writeAt(40, 5, "STATE", colors.gray)
+        writeAt(49, 5, "HEALTH", colors.gray)
+        writeAt(58, 5, "LINES", colors.gray)
+
+        local y = 7
 
         for _, module in ipairs(list) do
             if y > height - 3 then break end
 
             local net, netColor = networkState(module, now)
+            local isOffline = net == "OFFLINE"
             local label = tostring(module.label or module.id or "?")
-            local mode = tostring(module.mode or "?")
-            local state = tostring(module.state or "?")
-            local health = tostring(module.health or "?")
 
             writeAt(2, y, label, colors.white)
             writeAt(20, y, net, netColor)
-            writeAt(31, y, mode, mode == "AUTO" and colors.lime or colors.yellow)
-            writeAt(40, y, state, stateColor(state))
-            writeAt(49, y, health, healthColor(health))
 
-            if type(module.activeLines) == "number" and type(module.totalLines) == "number" then
-                writeAt(58, y, ("%d/%d lines"):format(module.activeLines, module.totalLines), colors.lightGray)
-            end
+            if isOffline then
+                writeAt(31, y, "N/A", colors.gray)
+                writeAt(40, y, "N/A", colors.gray)
+                writeAt(49, y, "N/A", colors.gray)
+                writeAt(58, y, "N/A", colors.gray)
 
-            local metrics = type(module.metrics) == "table" and module.metrics or {}
-            local detail = {}
+                if y + 1 <= height - 3 then
+                    writeAt(
+                        4,
+                        y + 1,
+                        "WATER N/A   H2 N/A   O2 N/A",
+                        colors.gray
+                    )
+                end
 
-            if metrics.water ~= nil then table.insert(detail, "W " .. pct(metrics.water)) end
-            if metrics.hydrogen ~= nil then table.insert(detail, "H2 " .. pct(metrics.hydrogen)) end
-            if metrics.oxygen ~= nil then table.insert(detail, "O2 " .. pct(metrics.oxygen)) end
+            else
+                local mode = tostring(module.mode or "N/A")
+                local state = tostring(module.state or "N/A")
+                local health = tostring(module.health or "N/A")
 
-            local reason = tostring(module.reason or "")
-            local detailText = table.concat(detail, "  ")
-            if reason ~= "" then
-                if detailText ~= "" then detailText = detailText .. "  |  " end
-                detailText = detailText .. reason
-            end
+                writeAt(31, y, mode, mode == "AUTO" and colors.lime or colors.yellow)
+                writeAt(40, y, state, stateColor(state))
+                writeAt(49, y, health, healthColor(health))
 
-            if detailText ~= "" and y + 1 <= height - 3 then
-                writeAt(4, y + 1, detailText, colors.lightGray)
+                if type(module.activeLines) == "number" and type(module.totalLines) == "number" then
+                    writeAt(
+                        58,
+                        y,
+                        ("%d/%d"):format(module.activeLines, module.totalLines),
+                        colors.lightGray
+                    )
+                else
+                    writeAt(58, y, "N/A", colors.gray)
+                end
+
+                local metrics = type(module.metrics) == "table" and module.metrics or {}
+                local detail = {
+                    "WATER " .. (metrics.water ~= nil and pct(metrics.water) or "N/A"),
+                    "H2 " .. (metrics.hydrogen ~= nil and pct(metrics.hydrogen) or "N/A"),
+                    "O2 " .. (metrics.oxygen ~= nil and pct(metrics.oxygen) or "N/A"),
+                }
+
+                local detailText = table.concat(detail, "   ")
+                local reason = tostring(module.reason or "")
+
+                if reason ~= "" then
+                    detailText = detailText .. "   |   " .. reason
+                end
+
+                if y + 1 <= height - 3 then
+                    writeAt(4, y + 1, detailText, colors.lightGray)
+                end
             end
 
             y = y + 3
