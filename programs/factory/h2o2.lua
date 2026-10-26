@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.7.7"
+local PROGRAM_VERSION = "0.7.8"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
@@ -123,6 +123,8 @@ local autoState = {
     chemicalHold = false,
     overflowHydrogen = false,
     overflowOxygen = false,
+    surplusHydrogenHold = false,
+    surplusOxygenHold = false,
     overflowFault = false,
     overflowError = nil,
     lastTick = 0,
@@ -758,6 +760,34 @@ local function updateOverflowState(data, targetLines)
     local enable = config.auto.overflowEnable
     local disable = config.auto.overflowDisable
 
+    -- Surplus persistant :
+    -- si un buffer externe est plein alors que l'autre gaz reste demande,
+    -- on maintient le dump du gaz excedentaire EN CONTINU.
+    if targetLines <= 0 then
+        autoState.surplusHydrogenHold = false
+        autoState.surplusOxygenHold = false
+    else
+        if autoState.surplusHydrogenHold then
+            if h2External <= config.auto.chemicalResume
+                or o2External >= config.auto.chemicalStop then
+                autoState.surplusHydrogenHold = false
+            end
+        elseif h2External >= config.auto.chemicalStop
+            and o2External < config.auto.chemicalStop then
+            autoState.surplusHydrogenHold = true
+        end
+
+        if autoState.surplusOxygenHold then
+            if o2External <= config.auto.chemicalResume
+                or h2External >= config.auto.chemicalStop then
+                autoState.surplusOxygenHold = false
+            end
+        elseif o2External >= config.auto.chemicalStop
+            and h2External < config.auto.chemicalStop then
+            autoState.surplusOxygenHold = true
+        end
+    end
+
     local activeSeparators = {}
     for index, lineCfg in ipairs(config.lines or {}) do
         if index <= targetLines then
@@ -791,12 +821,12 @@ local function updateOverflowState(data, targetLines)
         local o2Internal = machine and machine.oxygenFill or nil
 
         local currentH2Dump =
-            h2Side == "LEFT" and machine and machine.leftDumpMode == "DUMPING"
-            or h2Side == "RIGHT" and machine and machine.rightDumpMode == "DUMPING"
+            (h2Side == "LEFT" and machine and machine.leftDumpMode == "DUMPING")
+            or (h2Side == "RIGHT" and machine and machine.rightDumpMode == "DUMPING")
 
         local currentO2Dump =
-            o2Side == "LEFT" and machine and machine.leftDumpMode == "DUMPING"
-            or o2Side == "RIGHT" and machine and machine.rightDumpMode == "DUMPING"
+            (o2Side == "LEFT" and machine and machine.leftDumpMode == "DUMPING")
+            or (o2Side == "RIGHT" and machine and machine.rightDumpMode == "DUMPING")
 
         local needO2 = o2External < config.auto.chemicalStop
         local needH2 = h2External < config.auto.chemicalStop
@@ -804,7 +834,11 @@ local function updateOverflowState(data, targetLines)
         local dumpH2 = false
         local dumpO2 = false
 
-        if lineIsActive and needO2 and type(h2Internal) == "number" then
+        if lineIsActive and autoState.surplusHydrogenHold and needO2 then
+            dumpH2 = true
+        elseif lineIsActive and needO2 and type(h2Internal) == "number" then
+            -- Securite interne secondaire : evite une saturation locale
+            -- meme avant que le Chemical Tank externe soit plein.
             if currentH2Dump then
                 dumpH2 = h2Internal > disable
             else
@@ -812,7 +846,9 @@ local function updateOverflowState(data, targetLines)
             end
         end
 
-        if lineIsActive and needH2 and type(o2Internal) == "number" then
+        if lineIsActive and autoState.surplusOxygenHold and needH2 then
+            dumpO2 = true
+        elseif lineIsActive and needH2 and type(o2Internal) == "number" then
             if currentO2Dump then
                 dumpO2 = o2Internal > disable
             else
@@ -1607,6 +1643,8 @@ local function toggleOperatingMode()
         autoState.chemicalHold = false
         autoState.overflowHydrogen = false
         autoState.overflowOxygen = false
+        autoState.surplusHydrogenHold = false
+        autoState.surplusOxygenHold = false
         autoState.overflowFault = false
         autoState.overflowError = nil
         actionMessage = "MODE MANUAL"
@@ -1619,6 +1657,8 @@ local function toggleOperatingMode()
         autoState.chemicalHold = false
         autoState.overflowHydrogen = false
         autoState.overflowOxygen = false
+        autoState.surplusHydrogenHold = false
+        autoState.surplusOxygenHold = false
         autoState.overflowFault = false
         autoState.overflowError = nil
         autoState.lastTick = 0
