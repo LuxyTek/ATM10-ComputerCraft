@@ -347,3 +347,36 @@ Le programme utilise les methodes Mekanism :
 Pour la recette eau du module H2/O2, H2 est la sortie gauche et O2 la sortie droite. Le code tente d'abord d'identifier le chemical reellement present avant d'utiliser ce mapping connu comme fallback.
 
 Le mode `DUMPING_EXCESS` ne vide pas les Chemical Tanks externes : il ne concerne que le buffer interne du Separator et permet d'eviter le blocage du process lorsqu'un des deux produits ne peut plus etre evacue.
+
+
+## V0.7.4 - Niveaux internes dans MACHINES
+
+La page `MACHINES` affiche maintenant la telemetrie interne de chaque machine sur une seconde ligne.
+
+### Electric Pump
+
+- pourcentage du buffer fluide interne.
+
+Exemple :
+
+```text
+PUMP  electricPump_2   LINE 1   RUN   [ AUTO ]
+      FLUID 100.0%
+```
+
+### Electrolytic Separator
+
+- pourcentage d'eau dans le buffer d'entree ;
+- pourcentage H2 dans le buffer chimique interne ;
+- pourcentage O2 dans le buffer chimique interne.
+
+Exemple :
+
+```text
+SEP   electrolyticSeparator_2   LINE 1   RUN   [ AUTO ]
+      WATER 100.0%   H2 98.4%   O2 12.7%
+```
+
+La pagination a ete adaptee au format deux lignes par machine.
+
+Correction associee : le fallback de mapping des sorties du Separator suit le mapping Mekanism 1.21.x, avec O2 a gauche et H2 a droite.
