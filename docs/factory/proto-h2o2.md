@@ -276,3 +276,21 @@ L'ordre de priorite suit `config.lines` : LINE 1, puis LINE 2, puis LINE 3.
 ### Energie
 
 La reserve electrique externe n'est volontairement pas encore utilisee par l'AUTO. Les energies internes des Separators ne sont pas considerees comme un buffer usine fiable. Le controle energie sera ajoute apres validation d'un Energy Cube ou autre buffer externe sur le reseau CC.
+
+
+## V0.7.1 - Buffers locaux avec Quantum Entangloporters non supervises
+
+Chaque Chemical Tank H2/O2 dispose d'un Quantum Entangloporter non present sur le reseau CC.
+
+L'AUTO ne tente pas d'estimer le contenu des QE. Ils sont consideres comme une reserve externe inconnue.
+
+Regle retenue :
+
+- les Chemical Tanks locaux restent les buffers de regulation ;
+- le tank local le moins rempli pilote la demande de production ;
+- un tank local a 0 % est donc une forte demande, meme si le QE peut encore contenir du gaz ;
+- le ralentissement 3 / 2 / 1 lignes suit le niveau du tank local le moins rempli ;
+- l'arret "buffers pleins" ne se produit que lorsque H2 ET O2 atteignent chacun le seuil `chemicalStop` ;
+- apres cet arret, la production est reautorisee des qu'au moins un des deux tanks retombe sous `chemicalResume`.
+
+Cette logique evite qu'un tank H2 naturellement plus vite rempli a cause du ratio de production 2:1 ne bride prematurement le remplissage du tank O2.
