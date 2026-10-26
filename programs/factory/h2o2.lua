@@ -674,12 +674,28 @@ local function updateOverflowState(data, targetLines)
         end
     end
 
-    local h2Mode = autoState.overflowHydrogen and "DUMPING_EXCESS" or "IDLE"
-    local o2Mode = autoState.overflowOxygen and "DUMPING_EXCESS" or "IDLE"
+    local activeSeparators = {}
+    for index, lineCfg in ipairs(config.lines or {}) do
+        if index <= targetLines then
+            activeSeparators[lineCfg.separator] = true
+        end
+    end
 
     local allOK = true
 
     for _, separator in ipairs(data.devices.separators or {}) do
+        local lineIsActive = activeSeparators[separator.name] == true
+
+        local h2Mode =
+            lineIsActive and autoState.overflowHydrogen
+            and "DUMPING_EXCESS"
+            or "IDLE"
+
+        local o2Mode =
+            lineIsActive and autoState.overflowOxygen
+            and "DUMPING_EXCESS"
+            or "IDLE"
+
         local h2Side = separatorChemicalSide(separator.dev, "mekanism:hydrogen")
         local o2Side = separatorChemicalSide(separator.dev, "mekanism:oxygen")
 
