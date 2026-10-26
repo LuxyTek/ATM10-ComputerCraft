@@ -35,6 +35,12 @@ return {
         scaleToTwo = 0.30,
         scaleToOne = 0.70,
         stageHysteresis = 0.05,
+
+        -- Anti-blocage Separator : si un gaz local est quasi plein
+        -- alors que l'autre doit encore etre produit, sa sortie passe
+        -- temporairement en DUMPING_EXCESS.
+        overflowEnable = 0.98,
+        overflowDisable = 0.90,
     },
 
 
