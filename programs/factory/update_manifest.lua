@@ -1,8 +1,8 @@
 return {
-    version = "0.2.0",
+    version = "0.2.1",
 
-    -- Only program files are updated automatically.
-    -- Runtime configuration is deliberately preserved.
+    -- Program files and startup are updated automatically.
+    -- Runtime configuration remains preserved.
     files = {
         {
             remote = "programs/factory/h2o2.lua",
@@ -19,6 +19,10 @@ return {
         {
             remote = "programs/factory/update_manifest.lua",
             localPath = "/programs/factory/update_manifest.lua",
+        },
+        {
+            remote = "startup_factory.lua",
+            localPath = "/startup.lua",
         },
     },
 }
