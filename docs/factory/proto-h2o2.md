@@ -208,3 +208,11 @@ Etats :
 Le mapping est porte par la configuration et n'est pas deduit des suffixes CC.
 
 Correction UI incluse : chaque ecriture revient sur un fond noir par defaut, ce qui supprime les bandes rouges/vertes heritees des boutons.
+
+
+## V0.5.1 - Nettoyage UI lignes
+
+- la page `LINES` n'affiche plus les noms techniques Pump / Separator ;
+- elle affiche uniquement `LINE X`, l'etat de la ligne et le bouton START / STOP ;
+- la page `MACHINES` indique maintenant la ligne logique de chaque Pump et Separator ;
+- une machine non associee est affichee `UNASSIGNED`.
