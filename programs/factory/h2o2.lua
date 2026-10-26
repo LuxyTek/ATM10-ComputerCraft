@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.3.0"
+local PROGRAM_VERSION = "0.4.0"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 
@@ -44,9 +44,17 @@ physicalMonitor.setTextScale(config.textScale)
 local width, height = physicalMonitor.getSize()
 local monitor = window.create(physicalMonitor, 1, 1, width, height, false)
 
+local currentPage = "overview"
+local machinePage = 1
+
+local tabOverviewBounds = nil
+local tabMachinesBounds = nil
 local updateBounds = nil
 local startBounds = nil
 local stopBounds = nil
+local prevBounds = nil
+local nextBounds = nil
+local machineButtonBounds = {}
 
 local updateConfirmUntil = 0
 local updateMessage = nil
@@ -72,6 +80,13 @@ local function normType(name)
     return tostring(peripheral.getType(name) or ""):lower()
 end
 
+local function controlStateFromMode(mode)
+    if mode == "DISABLED" then return "RUN" end
+    if mode == config.stopMode then return "STOP" end
+    if mode == nil then return "UNKNOWN" end
+    return tostring(mode)
+end
+
 local function classify()
     local found = {
         separators = {},
@@ -82,15 +97,26 @@ local function classify()
         energyCubes = {},
     }
 
-    for _, name in ipairs(peripheral.getNames()) do
+    local names = peripheral.getNames()
+    table.sort(names)
+
+    for _, name in ipairs(names) do
         local pType = normType(name)
         local device = peripheral.wrap(name)
 
         if pType:find("electrolyticseparator", 1, true) then
-            table.insert(found.separators, { name = name, dev = device })
+            table.insert(found.separators, {
+                name = name,
+                dev = device,
+                state = controlStateFromMode(safeCall(device, "getRedstoneMode")),
+            })
 
         elseif pType:find("electricpump", 1, true) then
-            table.insert(found.pumps, { name = name, dev = device })
+            table.insert(found.pumps, {
+                name = name,
+                dev = device,
+                state = controlStateFromMode(safeCall(device, "getRedstoneMode")),
+            })
 
         elseif pType:find("energycube", 1, true) then
             table.insert(found.energyCubes, { name = name, dev = device })
@@ -161,11 +187,9 @@ local function getControlState(devices)
 
     local function inspect(list)
         for _, item in ipairs(list) do
-            local mode = safeCall(item.dev, "getRedstoneMode")
-
-            if mode == "DISABLED" then
+            if item.state == "RUN" then
                 running = running + 1
-            elseif mode == config.stopMode then
+            elseif item.state == "STOP" then
                 stopped = stopped + 1
             end
         end
@@ -190,8 +214,32 @@ local function collectData()
     local energy, maxEnergy, usage, separatorOnline =
         sumSeparatorTelemetry(devices.separators)
 
+    local machines = {}
+
+    for _, item in ipairs(devices.pumps) do
+        table.insert(machines, {
+            kind = "PUMP",
+            name = item.name,
+            state = item.state,
+        })
+    end
+
+    for _, item in ipairs(devices.separators) do
+        table.insert(machines, {
+            kind = "SEP",
+            name = item.name,
+            state = item.state,
+        })
+    end
+
+    table.sort(machines, function(a, b)
+        if a.kind == b.kind then return a.name < b.name end
+        return a.kind < b.kind
+    end)
+
     return {
         devices = devices,
+        machines = machines,
 
         water = water,
         waterCapacity = waterCapacity,
@@ -209,6 +257,26 @@ local function collectData()
         separatorOnline = separatorOnline,
         controlState = getControlState(devices),
     }
+end
+
+local function setMachineMode(name, targetMode)
+    if not peripheral.isPresent(name) then
+        return false, "ABSENT"
+    end
+
+    local device = peripheral.wrap(name)
+
+    if not device or type(device.setRedstoneMode) ~= "function" then
+        return false, "NON CONTROLABLE"
+    end
+
+    local ok, err = pcall(device.setRedstoneMode, targetMode)
+
+    if not ok then
+        return false, tostring(err)
+    end
+
+    return true, name
 end
 
 local function setProcessMode(targetMode)
@@ -317,6 +385,44 @@ local function centered(y, text, fg, bg)
     writeAt(x, y, text, fg, bg)
 end
 
+local function inside(bounds, x, y)
+    return bounds
+        and x >= bounds.x1
+        and x <= bounds.x2
+        and y >= bounds.y1
+        and y <= bounds.y2
+end
+
+local function shortName(name, maxLen)
+    if #name <= maxLen then return name end
+    return name:sub(1, math.max(1, maxLen - 3)) .. "..."
+end
+
+local function drawTabs()
+    local overviewLabel = "[ OVERVIEW ]"
+    local machinesLabel = "[ MACHINES ]"
+
+    local overviewBg = currentPage == "overview" and colors.blue or colors.gray
+    local machinesBg = currentPage == "machines" and colors.blue or colors.gray
+
+    writeAt(2, 3, overviewLabel, colors.white, overviewBg)
+    tabOverviewBounds = {
+        x1 = 2,
+        x2 = 2 + #overviewLabel - 1,
+        y1 = 3,
+        y2 = 3,
+    }
+
+    local machineX = 2 + #overviewLabel + 2
+    writeAt(machineX, 3, machinesLabel, colors.white, machinesBg)
+    tabMachinesBounds = {
+        x1 = machineX,
+        x2 = machineX + #machinesLabel - 1,
+        y1 = 3,
+        y2 = 3,
+    }
+end
+
 local function drawBar(y, label, amount, capacity, color)
     local fill = ratio(amount, capacity)
     local pctText = string.format("%5.1f%%", fill * 100)
@@ -336,18 +442,28 @@ local function drawBar(y, label, amount, capacity, color)
     writeAt(barX + barWidth + 1, y, pctText, colors.white, colors.black)
 end
 
-local function drawControlButtons()
+local function drawGlobalControls()
     local y = math.max(19, height - 2)
 
-    local startLabel = "[ START ]"
-    local stopLabel = "[ STOP ]"
+    local startLabel = "[ START ALL ]"
+    local stopLabel = "[ STOP ALL ]"
 
     writeAt(2, y, startLabel, colors.black, colors.lime)
-    startBounds = { x1 = 2, x2 = 2 + #startLabel - 1, y1 = y, y2 = y }
+    startBounds = {
+        x1 = 2,
+        x2 = 2 + #startLabel - 1,
+        y1 = y,
+        y2 = y,
+    }
 
     local stopX = 2 + #startLabel + 2
     writeAt(stopX, y, stopLabel, colors.white, colors.red)
-    stopBounds = { x1 = stopX, x2 = stopX + #stopLabel - 1, y1 = y, y2 = y }
+    stopBounds = {
+        x1 = stopX,
+        x2 = stopX + #stopLabel - 1,
+        y1 = y,
+        y2 = y,
+    }
 end
 
 local function drawUpdateButton(now)
@@ -372,15 +488,177 @@ local function drawUpdateButton(now)
     local x = math.max(2, width - #label - 1)
 
     writeAt(x, height, label, fg, bg)
-    updateBounds = { x1 = x, x2 = x + #label - 1, y1 = height, y2 = height }
+    updateBounds = {
+        x1 = x,
+        x2 = x + #label - 1,
+        y1 = height,
+        y2 = height,
+    }
 end
 
-local function inside(bounds, x, y)
-    return bounds
-        and x >= bounds.x1
-        and x <= bounds.x2
-        and y >= bounds.y1
-        and y <= bounds.y2
+local function renderOverview(data)
+    local devices = data.devices
+
+    local statusOK =
+        #devices.separators > 0
+        and #devices.hydrogenTanks > 0
+        and #devices.oxygenTanks > 0
+        and #devices.waterTanks > 0
+
+    centered(
+        5,
+        statusOK and "SYSTEME ONLINE" or "PERIPHERIQUE MANQUANT",
+        statusOK and colors.lime or colors.red
+    )
+
+    local controlColor = colors.orange
+    if data.controlState == "RUN" then controlColor = colors.lime end
+    if data.controlState == "STOP" then controlColor = colors.red end
+
+    centered(6, "PROCESS CONTROL : " .. data.controlState, controlColor)
+
+    drawBar(8, "WATER", data.water, data.waterCapacity, colors.blue)
+    drawBar(10, "HYDROGEN", data.hydrogen, data.hydrogenCapacity, colors.lightBlue)
+    drawBar(12, "OXYGEN", data.oxygen, data.oxygenCapacity, colors.cyan)
+
+    writeAt(
+        2,
+        14,
+        ("Separators : %d/%d online"):format(data.separatorOnline, #devices.separators),
+        data.separatorOnline == #devices.separators and colors.lime or colors.orange
+    )
+
+    writeAt(2, 15, "Usage      : " .. compact(data.usage, " FE/t"), colors.white)
+
+    if data.maxEnergy > 0 then
+        writeAt(
+            2,
+            16,
+            ("Sep energy : %s / %s"):format(
+                compact(data.energy, " FE"),
+                compact(data.maxEnergy, " FE")
+            ),
+            colors.white
+        )
+    end
+
+    writeAt(
+        2,
+        18,
+        ("Buffers    : W:%d H2:%d O2:%d"):format(
+            #devices.waterTanks,
+            #devices.hydrogenTanks,
+            #devices.oxygenTanks
+        ),
+        colors.lightGray
+    )
+
+    writeAt(2, 19, ("Pumps      : %d"):format(#devices.pumps), colors.lightGray)
+
+    drawGlobalControls()
+end
+
+local function renderMachines(data)
+    machineButtonBounds = {}
+    prevBounds = nil
+    nextBounds = nil
+
+    centered(5, "CONTROLE MACHINES", colors.cyan)
+
+    local firstY = 7
+    local footerReserve = 4
+    local rowsPerPage = math.max(1, height - firstY - footerReserve)
+    local total = #data.machines
+    local pageCount = math.max(1, math.ceil(total / rowsPerPage))
+
+    if machinePage > pageCount then machinePage = pageCount end
+    if machinePage < 1 then machinePage = 1 end
+
+    local startIndex = (machinePage - 1) * rowsPerPage + 1
+    local endIndex = math.min(total, startIndex + rowsPerPage - 1)
+
+    if total == 0 then
+        centered(8, "AUCUNE MACHINE", colors.orange)
+    else
+        local y = firstY
+
+        for index = startIndex, endIndex do
+            local machine = data.machines[index]
+
+            local kindColor = machine.kind == "PUMP" and colors.lightBlue or colors.cyan
+            local stateColor = colors.orange
+            if machine.state == "RUN" then stateColor = colors.lime end
+            if machine.state == "STOP" then stateColor = colors.red end
+
+            writeAt(2, y, machine.kind, kindColor)
+            writeAt(8, y, shortName(machine.name, math.max(12, width - 32)), colors.white)
+
+            local stateX = math.max(20, width - 18)
+            writeAt(stateX, y, machine.state, stateColor)
+
+            local buttonLabel
+            local buttonMode
+            local buttonBg
+
+            if machine.state == "RUN" then
+                buttonLabel = "[ STOP ]"
+                buttonMode = config.stopMode
+                buttonBg = colors.red
+            else
+                buttonLabel = "[ START ]"
+                buttonMode = "DISABLED"
+                buttonBg = colors.lime
+            end
+
+            local buttonX = math.max(stateX + 7, width - #buttonLabel - 1)
+            writeAt(
+                buttonX,
+                y,
+                buttonLabel,
+                buttonMode == "DISABLED" and colors.black or colors.white,
+                buttonBg
+            )
+
+            table.insert(machineButtonBounds, {
+                x1 = buttonX,
+                x2 = buttonX + #buttonLabel - 1,
+                y1 = y,
+                y2 = y,
+                name = machine.name,
+                kind = machine.kind,
+                targetMode = buttonMode,
+            })
+
+            y = y + 1
+        end
+    end
+
+    local navY = height - 2
+
+    if machinePage > 1 then
+        local label = "[ < ]"
+        writeAt(2, navY, label, colors.white, colors.gray)
+        prevBounds = {
+            x1 = 2,
+            x2 = 2 + #label - 1,
+            y1 = navY,
+            y2 = navY,
+        }
+    end
+
+    centered(navY, ("PAGE %d/%d"):format(machinePage, pageCount), colors.lightGray)
+
+    if machinePage < pageCount then
+        local label = "[ > ]"
+        local x = width - #label - 1
+        writeAt(x, navY, label, colors.white, colors.gray)
+        nextBounds = {
+            x1 = x,
+            x2 = x + #label - 1,
+            y1 = navY,
+            y2 = navY,
+        }
+    end
 end
 
 local function render()
@@ -392,74 +670,26 @@ local function render()
     monitor.clear()
 
     centered(1, "FACTORY H2/O2  v" .. PROGRAM_VERSION, colors.cyan)
-    centered(2, "PROTO 01", colors.lightGray)
+    drawTabs()
+
+    startBounds = nil
+    stopBounds = nil
+    machineButtonBounds = {}
+    prevBounds = nil
+    nextBounds = nil
 
     if not data then
-        centered(4, "INITIALISATION...", colors.orange)
+        centered(6, "INITIALISATION...", colors.orange)
         drawUpdateButton(now)
         monitor.setVisible(true)
         return
     end
 
-    local devices = data.devices
-
-    local statusOK =
-        #devices.separators > 0
-        and #devices.hydrogenTanks > 0
-        and #devices.oxygenTanks > 0
-        and #devices.waterTanks > 0
-
-    centered(
-        4,
-        statusOK and "SYSTEME ONLINE" or "PERIPHERIQUE MANQUANT",
-        statusOK and colors.lime or colors.red
-    )
-
-    local controlColor = colors.orange
-    if data.controlState == "RUN" then controlColor = colors.lime end
-    if data.controlState == "STOP" then controlColor = colors.red end
-
-    centered(5, "PROCESS CONTROL : " .. data.controlState, controlColor)
-
-    drawBar(7, "WATER", data.water, data.waterCapacity, colors.blue)
-    drawBar(9, "HYDROGEN", data.hydrogen, data.hydrogenCapacity, colors.lightBlue)
-    drawBar(11, "OXYGEN", data.oxygen, data.oxygenCapacity, colors.cyan)
-
-    writeAt(
-        2,
-        13,
-        ("Separators : %d/%d online"):format(data.separatorOnline, #devices.separators),
-        data.separatorOnline == #devices.separators and colors.lime or colors.orange
-    )
-
-    writeAt(2, 14, "Usage      : " .. compact(data.usage, " FE/t"), colors.white)
-
-    if data.maxEnergy > 0 then
-        writeAt(
-            2,
-            15,
-            ("Sep energy : %s / %s"):format(
-                compact(data.energy, " FE"),
-                compact(data.maxEnergy, " FE")
-            ),
-            colors.white
-        )
+    if currentPage == "machines" then
+        renderMachines(data)
+    else
+        renderOverview(data)
     end
-
-    writeAt(
-        2,
-        17,
-        ("Buffers    : W:%d H2:%d O2:%d"):format(
-            #devices.waterTanks,
-            #devices.hydrogenTanks,
-            #devices.oxygenTanks
-        ),
-        colors.lightGray
-    )
-
-    writeAt(2, 18, ("Pumps      : %d"):format(#devices.pumps), colors.lightGray)
-
-    drawControlButtons()
 
     if actionMessage and now < actionMessageUntil then
         writeAt(2, height - 1, actionMessage, colors.yellow, colors.black)
@@ -530,6 +760,39 @@ local function doUpdate()
     render()
 end
 
+local function queueGlobalControl(targetMode, label)
+    if updateInProgress or controlPending then return end
+
+    local now = os.epoch("utc") / 1000
+
+    controlPending = label
+    actionMessage = label .. " EN COURS..."
+    actionMessageUntil = now + 10
+    render()
+
+    os.queueEvent("factory_control_request", "all", "", targetMode, label)
+end
+
+local function queueMachineControl(button)
+    if updateInProgress or controlPending then return end
+
+    local now = os.epoch("utc") / 1000
+    local verb = button.targetMode == "DISABLED" and "START" or "STOP"
+
+    controlPending = button.name
+    actionMessage = verb .. " " .. shortName(button.name, 24) .. "..."
+    actionMessageUntil = now + 10
+    render()
+
+    os.queueEvent(
+        "factory_control_request",
+        "machine",
+        button.name,
+        button.targetMode,
+        verb
+    )
+end
+
 local function uiLoop()
     render()
 
@@ -543,49 +806,73 @@ local function uiLoop()
             local x, y = p2, p3
             local now = os.epoch("utc") / 1000
 
-            if inside(startBounds, x, y)
-                and not updateInProgress
-                and not controlPending then
-
-                controlPending = "START"
-                actionMessage = "START EN COURS..."
-                actionMessageUntil = now + 10
+            if inside(tabOverviewBounds, x, y) then
+                currentPage = "overview"
                 render()
-                os.queueEvent("factory_control_request", "DISABLED", "START")
 
-            elseif inside(stopBounds, x, y)
-                and not updateInProgress
-                and not controlPending then
-
-                controlPending = "STOP"
-                actionMessage = "STOP EN COURS..."
-                actionMessageUntil = now + 10
+            elseif inside(tabMachinesBounds, x, y) then
+                currentPage = "machines"
                 render()
-                os.queueEvent("factory_control_request", config.stopMode, "STOP")
 
-            elseif inside(updateBounds, x, y) and not updateInProgress then
-                if now < updateConfirmUntil then
-                    doUpdate()
-                else
-                    updateConfirmUntil = now + 8
-                    render()
+            elseif inside(prevBounds, x, y) then
+                machinePage = math.max(1, machinePage - 1)
+                render()
+
+            elseif inside(nextBounds, x, y) then
+                machinePage = machinePage + 1
+                render()
+
+            elseif inside(startBounds, x, y) then
+                queueGlobalControl("DISABLED", "START ALL")
+
+            elseif inside(stopBounds, x, y) then
+                queueGlobalControl(config.stopMode, "STOP ALL")
+
+            else
+                local handled = false
+
+                for _, button in ipairs(machineButtonBounds) do
+                    if inside(button, x, y) then
+                        queueMachineControl(button)
+                        handled = true
+                        break
+                    end
+                end
+
+                if not handled
+                    and inside(updateBounds, x, y)
+                    and not updateInProgress then
+
+                    if now < updateConfirmUntil then
+                        doUpdate()
+                    else
+                        updateConfirmUntil = now + 8
+                        render()
+                    end
                 end
             end
-
         end
     end
 end
 
 local function controlLoop()
     while true do
-        local _, targetMode, label = os.pullEvent("factory_control_request")
+        local _, scope, targetName, targetMode, label =
+            os.pullEvent("factory_control_request")
 
-        local ok, detail = setProcessMode(targetMode)
+        local ok, detail
+
+        if scope == "machine" then
+            ok, detail = setMachineMode(targetName, targetMode)
+        else
+            ok, detail = setProcessMode(targetMode)
+        end
+
         local now = os.epoch("utc") / 1000
 
         actionMessage =
-            ok and (label .. " OK  " .. detail)
-            or (label .. " ECHEC  " .. detail)
+            ok and (label .. " OK  " .. shortName(detail, 30))
+            or (label .. " ECHEC  " .. shortName(detail, 30))
 
         actionMessageUntil = now + 5
         controlPending = nil
