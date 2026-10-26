@@ -5,7 +5,10 @@ local BASE = ("https://raw.githubusercontent.com/%s/%s/%s/"):format(OWNER, REPO,
 
 local files = {
     {"programs/factory/dashboard.lua", "/programs/factory/dashboard.lua", true},
+    {"programs/factory/lib/updater.lua", "/programs/factory/lib/updater.lua", true},
+    {"programs/factory/dashboard_update_manifest.lua", "/programs/factory/dashboard_update_manifest.lua", true},
     {"config/factory_dashboard.example.lua", "/config/factory_dashboard.lua", false},
+    {"startup_factory_dashboard.lua", "/startup.lua", true},
 }
 
 local function ensureParent(path)
@@ -82,4 +85,5 @@ end
 
 print("")
 print("Installation terminee.")
-print("Lancement : programs/factory/dashboard")
+print("Le Dashboard demarrera automatiquement au prochain reboot.")
+print("Lancement immediat : programs/factory/dashboard")
