@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.6.1"
+local PROGRAM_VERSION = "0.7.0"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 
@@ -15,6 +15,20 @@ local defaults = {
         { id = "LINE 2", pump = "electricPump_1", separator = "electrolyticSeparator_0" },
         { id = "LINE 3", pump = "electricPump_0", separator = "electrolyticSeparator_1" },
     },
+
+    auto = {
+        checkSeconds = 2,
+
+        waterStop = 0.10,
+        waterResume = 0.40,
+
+        chemicalStop = 0.95,
+        chemicalResume = 0.80,
+
+        scaleToTwo = 0.30,
+        scaleToOne = 0.70,
+        stageHysteresis = 0.05,
+    },
 }
 
 local function loadConfig()
@@ -23,10 +37,17 @@ local function loadConfig()
     local ok, cfg = pcall(dofile, CONFIG_PATH)
     if not ok or type(cfg) ~= "table" then return defaults end
 
-    for key, value in pairs(defaults) do
-        if cfg[key] == nil then cfg[key] = value end
+    local function mergeMissing(target, source)
+        for key, value in pairs(source) do
+            if target[key] == nil then
+                target[key] = value
+            elseif type(target[key]) == "table" and type(value) == "table" then
+                mergeMissing(target[key], value)
+            end
+        end
     end
 
+    mergeMissing(cfg, defaults)
     return cfg
 end
 
@@ -58,6 +79,7 @@ local machinePage = 1
 local tabOverviewBounds = nil
 local tabMachinesBounds = nil
 local updateBounds = nil
+local modeButtonBounds = nil
 local startBounds = nil
 local stopBounds = nil
 local prevBounds = nil
@@ -75,6 +97,16 @@ local actionMessageUntil = 0
 local controlPending = nil
 local controlPendingSince = 0
 local CONTROL_WATCHDOG_SECONDS = 5
+
+local operatingMode = "MANUAL"
+local autoState = {
+    targetLines = 0,
+    reason = "MANUAL",
+    stage = nil,
+    waterHold = false,
+    chemicalHold = false,
+    lastTick = 0,
+}
 
 local dataCache = nil
 
@@ -428,6 +460,110 @@ local function ratio(amount, capacity)
     return math.max(0, math.min(1, amount / capacity))
 end
 
+local function initialAutoStage(fill, maxLines)
+    if maxLines <= 0 then return 0 end
+    if fill >= config.auto.chemicalStop then return 0 end
+    if fill >= config.auto.scaleToOne then return math.min(1, maxLines) end
+    if fill >= config.auto.scaleToTwo then return math.min(2, maxLines) end
+    return maxLines
+end
+
+local function decideAutoTarget(data)
+    local maxLines = #(config.lines or {})
+    if maxLines == 0 then
+        autoState.stage = 0
+        return 0, "NO LINES"
+    end
+
+    if data.waterCapacity <= 0 then
+        autoState.stage = 0
+        return 0, "FAULT WATER"
+    end
+
+    if data.hydrogenCapacity <= 0 or data.oxygenCapacity <= 0 then
+        autoState.stage = 0
+        return 0, "FAULT BUFFER"
+    end
+
+    local waterFill = ratio(data.water, data.waterCapacity)
+    local h2Fill = ratio(data.hydrogen, data.hydrogenCapacity)
+    local o2Fill = ratio(data.oxygen, data.oxygenCapacity)
+    local chemicalFill = math.max(h2Fill, o2Fill)
+
+    if autoState.waterHold then
+        if waterFill >= config.auto.waterResume then
+            autoState.waterHold = false
+            autoState.stage = nil
+        else
+            autoState.stage = 0
+            return 0, ("HOLD WATER %.0f%%"):format(waterFill * 100)
+        end
+    elseif waterFill <= config.auto.waterStop then
+        autoState.waterHold = true
+        autoState.stage = 0
+        return 0, ("HOLD WATER %.0f%%"):format(waterFill * 100)
+    end
+
+    if autoState.chemicalHold then
+        if chemicalFill <= config.auto.chemicalResume then
+            autoState.chemicalHold = false
+            autoState.stage = nil
+        else
+            autoState.stage = 0
+            return 0, ("HOLD BUFFER %.0f%%"):format(chemicalFill * 100)
+        end
+    elseif chemicalFill >= config.auto.chemicalStop then
+        autoState.chemicalHold = true
+        autoState.stage = 0
+        return 0, ("HOLD BUFFER %.0f%%"):format(chemicalFill * 100)
+    end
+
+    local h = config.auto.stageHysteresis
+    local stage = autoState.stage
+
+    if not stage or stage <= 0 then
+        stage = initialAutoStage(chemicalFill, maxLines)
+    elseif stage >= 3 then
+        if chemicalFill >= config.auto.scaleToTwo + h then
+            stage = math.min(2, maxLines)
+        end
+    elseif stage == 2 then
+        if chemicalFill >= config.auto.scaleToOne + h then
+            stage = math.min(1, maxLines)
+        elseif chemicalFill < config.auto.scaleToTwo - h then
+            stage = maxLines
+        end
+    elseif stage == 1 then
+        if chemicalFill < config.auto.scaleToOne - h then
+            stage = math.min(2, maxLines)
+        end
+    end
+
+    stage = math.max(0, math.min(stage, maxLines))
+    autoState.stage = stage
+
+    return stage, ("BUFFER %.0f%%"):format(chemicalFill * 100)
+end
+
+local function applyAutoTarget(data, targetLines)
+    local changed = false
+    local allOK = true
+
+    for index, lineCfg in ipairs(config.lines or {}) do
+        local desiredState = index <= targetLines and "RUN" or "STOP"
+        local current = data.lines[index] and data.lines[index].state or "MISSING"
+
+        if current ~= desiredState then
+            local targetMode = desiredState == "RUN" and "DISABLED" or config.stopMode
+            local ok = setLineMode(lineCfg.id, targetMode)
+            changed = true
+            if not ok then allOK = false end
+        end
+    end
+
+    return allOK, changed
+end
+
 local function compact(value, unit)
     if type(value) ~= "number" then return "--" end
 
@@ -521,8 +657,41 @@ local function drawBar(y, label, amount, capacity, color)
     writeAt(barX + barWidth + 1, y, pctText, colors.white, colors.black)
 end
 
+local function drawModeControl(y)
+    writeAt(2, y, "MODE :", colors.lightGray)
+
+    if operatingMode == "AUTO" then
+        writeAt(9, y, "AUTO", colors.lime)
+
+        local targetText = ("TARGET %d/%d"):format(
+            autoState.targetLines,
+            #(config.lines or {})
+        )
+        writeAt(16, y, targetText, colors.white)
+
+        local label = "[ MANUAL ]"
+        local x = width - #label - 1
+        writeAt(x, y, label, colors.white, colors.blue)
+        modeButtonBounds = { x1 = x, x2 = x + #label - 1, y1 = y, y2 = y }
+    else
+        writeAt(9, y, "MANUAL", colors.yellow)
+
+        local label = "[ AUTO ]"
+        local x = width - #label - 1
+        writeAt(x, y, label, colors.black, colors.lime)
+        modeButtonBounds = { x1 = x, x2 = x + #label - 1, y1 = y, y2 = y }
+    end
+end
+
 local function drawGlobalControls()
     local y = math.max(19, height - 2)
+
+    if operatingMode == "AUTO" then
+        writeAt(2, y, "AUTO ACTIF - CONTROLES MANUELS VERROUILLES", colors.lightGray)
+        startBounds = nil
+        stopBounds = nil
+        return
+    end
 
     local startLabel = "[ START ALL ]"
     local stopLabel = "[ STOP ALL ]"
@@ -643,8 +812,15 @@ end
 drawLineBlock = function(data)
     lineButtonBounds = {}
 
-    local titleY = math.max(20, height - 8)
+    local modeY = math.max(20, height - 9)
+    drawModeControl(modeY)
+
+    local titleY = modeY + 2
     writeAt(2, titleY, "LINES", colors.cyan)
+
+    if operatingMode == "AUTO" then
+        writeAt(10, titleY, autoState.reason, colors.lightGray)
+    end
 
     if #data.lines == 0 then
         writeAt(10, titleY, "AUCUNE", colors.orange)
@@ -660,38 +836,40 @@ drawLineBlock = function(data)
         if line.state == "MISSING" then stateColor = colors.lightGray end
 
         writeAt(4, y, line.id, colors.white)
+        writeAt(16, y, line.state, stateColor)
 
-        local stateX = 16
-        writeAt(stateX, y, line.state, stateColor)
-
-        local buttonLabel
-        local targetMode
-        local buttonBg
-        local buttonFg
-
-        if line.state == "RUN" then
-            buttonLabel = "[ STOP ]"
-            targetMode = config.stopMode
-            buttonBg = colors.red
-            buttonFg = colors.white
+        if operatingMode == "AUTO" then
+            writeAt(28, y, "[ AUTO ]", colors.lightGray, colors.gray)
         else
-            buttonLabel = "[ START ]"
-            targetMode = "DISABLED"
-            buttonBg = colors.lime
-            buttonFg = colors.black
+            local buttonLabel
+            local targetMode
+            local buttonBg
+            local buttonFg
+
+            if line.state == "RUN" then
+                buttonLabel = "[ STOP ]"
+                targetMode = config.stopMode
+                buttonBg = colors.red
+                buttonFg = colors.white
+            else
+                buttonLabel = "[ START ]"
+                targetMode = "DISABLED"
+                buttonBg = colors.lime
+                buttonFg = colors.black
+            end
+
+            local buttonX = 28
+            writeAt(buttonX, y, buttonLabel, buttonFg, buttonBg)
+
+            table.insert(lineButtonBounds, {
+                x1 = buttonX,
+                x2 = buttonX + #buttonLabel - 1,
+                y1 = y,
+                y2 = y,
+                id = line.id,
+                targetMode = targetMode,
+            })
         end
-
-        local buttonX = 28
-        writeAt(buttonX, y, buttonLabel, buttonFg, buttonBg)
-
-        table.insert(lineButtonBounds, {
-            x1 = buttonX,
-            x2 = buttonX + #buttonLabel - 1,
-            y1 = y,
-            y2 = y,
-            id = line.id,
-            targetMode = targetMode,
-        })
 
         y = y + 1
     end
@@ -741,38 +919,46 @@ local function renderMachines(data)
             local stateX = math.max(lineX + 10, width - 18)
             writeAt(stateX, y, machine.state, stateColor)
 
-            local buttonLabel
-            local buttonMode
-            local buttonBg
+            local buttonX
 
-            if machine.state == "RUN" then
-                buttonLabel = "[ STOP ]"
-                buttonMode = config.stopMode
-                buttonBg = colors.red
+            if operatingMode == "AUTO" then
+                local buttonLabel = "[ AUTO ]"
+                buttonX = math.max(stateX + 7, width - #buttonLabel - 1)
+                writeAt(buttonX, y, buttonLabel, colors.lightGray, colors.gray)
             else
-                buttonLabel = "[ START ]"
-                buttonMode = "DISABLED"
-                buttonBg = colors.lime
+                local buttonLabel
+                local buttonMode
+                local buttonBg
+
+                if machine.state == "RUN" then
+                    buttonLabel = "[ STOP ]"
+                    buttonMode = config.stopMode
+                    buttonBg = colors.red
+                else
+                    buttonLabel = "[ START ]"
+                    buttonMode = "DISABLED"
+                    buttonBg = colors.lime
+                end
+
+                buttonX = math.max(stateX + 7, width - #buttonLabel - 1)
+                writeAt(
+                    buttonX,
+                    y,
+                    buttonLabel,
+                    buttonMode == "DISABLED" and colors.black or colors.white,
+                    buttonBg
+                )
+
+                table.insert(machineButtonBounds, {
+                    x1 = buttonX,
+                    x2 = buttonX + #buttonLabel - 1,
+                    y1 = y,
+                    y2 = y,
+                    name = machine.name,
+                    kind = machine.kind,
+                    targetMode = buttonMode,
+                })
             end
-
-            local buttonX = math.max(stateX + 7, width - #buttonLabel - 1)
-            writeAt(
-                buttonX,
-                y,
-                buttonLabel,
-                buttonMode == "DISABLED" and colors.black or colors.white,
-                buttonBg
-            )
-
-            table.insert(machineButtonBounds, {
-                x1 = buttonX,
-                x2 = buttonX + #buttonLabel - 1,
-                y1 = y,
-                y2 = y,
-                name = machine.name,
-                kind = machine.kind,
-                targetMode = buttonMode,
-            })
 
             y = y + 1
         end
@@ -817,6 +1003,7 @@ local function render()
     centered(1, "FACTORY H2/O2  v" .. PROGRAM_VERSION, colors.cyan)
     drawTabs()
 
+    modeButtonBounds = nil
     startBounds = nil
     stopBounds = nil
     machineButtonBounds = {}
@@ -921,6 +1108,32 @@ local function controlIsLocked()
     return true
 end
 
+local function toggleOperatingMode()
+    local now = os.epoch("utc") / 1000
+
+    if operatingMode == "AUTO" then
+        operatingMode = "MANUAL"
+        autoState.reason = "MANUAL"
+        autoState.stage = nil
+        autoState.waterHold = false
+        autoState.chemicalHold = false
+        actionMessage = "MODE MANUAL"
+        actionMessageUntil = now + 4
+    else
+        operatingMode = "AUTO"
+        autoState.reason = "INITIALISATION"
+        autoState.stage = nil
+        autoState.waterHold = false
+        autoState.chemicalHold = false
+        autoState.lastTick = 0
+        actionMessage = "MODE AUTO"
+        actionMessageUntil = now + 4
+        os.queueEvent("factory_auto_tick")
+    end
+
+    render()
+end
+
 local function queueGlobalControl(targetMode, label)
     if updateInProgress or controlIsLocked() then return end
 
@@ -1007,6 +1220,9 @@ local function uiLoop()
                 machinePage = machinePage + 1
                 render()
 
+            elseif inside(modeButtonBounds, x, y) then
+                toggleOperatingMode()
+
             elseif inside(startBounds, x, y) then
                 queueGlobalControl("DISABLED", "START ALL")
 
@@ -1088,6 +1304,43 @@ local function controlLoop()
     end
 end
 
+local function autoLoop()
+    while true do
+        os.pullEvent("factory_auto_tick")
+
+        if operatingMode == "AUTO"
+            and not updateInProgress
+            and not controlPending
+            and dataCache then
+
+            local now = os.epoch("utc") / 1000
+
+            if now - autoState.lastTick >= config.auto.checkSeconds then
+                autoState.lastTick = now
+
+                local targetLines, reason = decideAutoTarget(dataCache)
+                autoState.targetLines = targetLines
+                autoState.reason = reason
+
+                local ok, changed = applyAutoTarget(dataCache, targetLines)
+
+                if not ok then
+                    autoState.reason = "FAULT CONTROL"
+                end
+
+                if changed then
+                    local refreshOK, freshData = pcall(collectData)
+                    if refreshOK then
+                        dataCache = freshData
+                    end
+                end
+
+                os.queueEvent("factory_refresh")
+            end
+        end
+    end
+end
+
 local function dataLoop()
     while true do
         local ok, freshData = pcall(collectData)
@@ -1095,6 +1348,9 @@ local function dataLoop()
         if ok then
             dataCache = freshData
             os.queueEvent("factory_refresh")
+            if operatingMode == "AUTO" then
+                os.queueEvent("factory_auto_tick")
+            end
         else
             actionMessage = "TELEMETRIE: ERREUR TRANSITOIRE"
             actionMessageUntil = os.epoch("utc") / 1000 + 3
@@ -1105,4 +1361,4 @@ local function dataLoop()
     end
 end
 
-parallel.waitForAny(uiLoop, dataLoop, controlLoop)
+parallel.waitForAny(uiLoop, dataLoop, controlLoop, autoLoop)
