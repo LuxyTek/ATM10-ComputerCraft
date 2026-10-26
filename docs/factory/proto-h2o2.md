@@ -294,3 +294,33 @@ Regle retenue :
 - apres cet arret, la production est reautorisee des qu'au moins un des deux tanks retombe sous `chemicalResume`.
 
 Cette logique evite qu'un tank H2 naturellement plus vite rempli a cause du ratio de production 2:1 ne bride prematurement le remplissage du tank O2.
+
+
+## V0.7.2 - Publication vers le Factory Dashboard
+
+Le module H2/O2 publie maintenant un statut normalise sur Rednet via `factory.status.v1`.
+
+La logique locale du module reste autonome : le Dashboard est uniquement observateur.
+
+Donnees publiees :
+
+- identite du module ;
+- version ;
+- mode MANUAL / AUTO ;
+- etat RUN / IDLE / HOLD / STOP ;
+- sante OK / WARN / FAULT ;
+- nombre de lignes actives ;
+- niveaux locaux WATER / H2 / O2 ;
+- raison synthetique de l'etat ;
+- alarmes de synthese.
+
+Exemples de raisons publiees :
+
+- `DEMAND H2 27%` ;
+- `DEMAND O2 41%` ;
+- `HOLD WATER 8%` ;
+- `BUFFER HOLD` ;
+- `BUFFER FULL` ;
+- `FAULT CONTROL`.
+
+Le contenu des Quantum Entangloporters reste volontairement inconnu : les niveaux publies correspondent aux buffers locaux supervises.
