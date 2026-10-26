@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.4.1"
+local PROGRAM_VERSION = "0.5.0"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 
@@ -7,6 +7,14 @@ local defaults = {
     textScale = 0.5,
     monitor = nil,
     stopMode = "HIGH",
+
+    -- Mapping logique confirme sur l'installation actuelle.
+    -- Il reste dans la configuration et n'est pas deduit des suffixes CC.
+    lines = {
+        { id = "LINE 1", pump = "electricPump_2", separator = "electrolyticSeparator_2" },
+        { id = "LINE 2", pump = "electricPump_1", separator = "electrolyticSeparator_0" },
+        { id = "LINE 3", pump = "electricPump_0", separator = "electrolyticSeparator_1" },
+    },
 }
 
 local function loadConfig()
@@ -48,6 +56,7 @@ local currentPage = "overview"
 local machinePage = 1
 
 local tabOverviewBounds = nil
+local tabLinesBounds = nil
 local tabMachinesBounds = nil
 local updateBounds = nil
 local startBounds = nil
@@ -55,6 +64,7 @@ local stopBounds = nil
 local prevBounds = nil
 local nextBounds = nil
 local machineButtonBounds = {}
+local lineButtonBounds = {}
 
 local updateConfirmUntil = 0
 local updateMessage = nil
@@ -239,9 +249,41 @@ local function collectData()
         return a.kind < b.kind
     end)
 
+    local machineByName = {}
+    for _, machine in ipairs(machines) do
+        machineByName[machine.name] = machine
+    end
+
+    local lines = {}
+    for _, lineCfg in ipairs(config.lines or {}) do
+        local pump = machineByName[lineCfg.pump]
+        local separator = machineByName[lineCfg.separator]
+
+        local state
+        if not pump or not separator then
+            state = "MISSING"
+        elseif pump.state == "RUN" and separator.state == "RUN" then
+            state = "RUN"
+        elseif pump.state == "STOP" and separator.state == "STOP" then
+            state = "STOP"
+        else
+            state = "MIXED"
+        end
+
+        table.insert(lines, {
+            id = lineCfg.id,
+            pump = lineCfg.pump,
+            separator = lineCfg.separator,
+            state = state,
+            pumpState = pump and pump.state or "MISSING",
+            separatorState = separator and separator.state or "MISSING",
+        })
+    end
+
     return {
         devices = devices,
         machines = machines,
+        lines = lines,
 
         water = water,
         waterCapacity = waterCapacity,
@@ -279,6 +321,43 @@ local function setMachineMode(name, targetMode)
     end
 
     return true, name
+end
+
+local function setLineMode(lineId, targetMode)
+    local lineCfg = nil
+
+    for _, line in ipairs(config.lines or {}) do
+        if line.id == lineId then
+            lineCfg = line
+            break
+        end
+    end
+
+    if not lineCfg then
+        return false, "LIGNE INCONNUE"
+    end
+
+    local pumpOK, sepOK = false, false
+
+    if peripheral.isPresent(lineCfg.pump) then
+        local pump = peripheral.wrap(lineCfg.pump)
+        if pump and type(pump.setRedstoneMode) == "function" then
+            pumpOK = pcall(pump.setRedstoneMode, targetMode)
+        end
+    end
+
+    if peripheral.isPresent(lineCfg.separator) then
+        local separator = peripheral.wrap(lineCfg.separator)
+        if separator and type(separator.setRedstoneMode) == "function" then
+            sepOK = pcall(separator.setRedstoneMode, targetMode)
+        end
+    end
+
+    return pumpOK and sepOK,
+        ("PUMP %s  SEP %s"):format(
+            pumpOK and "OK" or "ERR",
+            sepOK and "OK" or "ERR"
+        )
 end
 
 local function setProcessMode(targetMode)
@@ -346,8 +425,8 @@ local function writeAt(x, y, text, fg, bg)
     x = math.max(1, x)
 
     monitor.setCursorPos(x, y)
-    if fg then monitor.setTextColor(fg) end
-    if bg then monitor.setBackgroundColor(bg) end
+    monitor.setTextColor(fg or colors.white)
+    monitor.setBackgroundColor(bg or colors.black)
 
     local available = width - x + 1
     if available > 0 then
@@ -375,9 +454,11 @@ end
 
 local function drawTabs()
     local overviewLabel = "[ OVERVIEW ]"
+    local linesLabel = "[ LINES ]"
     local machinesLabel = "[ MACHINES ]"
 
     local overviewBg = currentPage == "overview" and colors.blue or colors.gray
+    local linesBg = currentPage == "lines" and colors.blue or colors.gray
     local machinesBg = currentPage == "machines" and colors.blue or colors.gray
 
     writeAt(2, 3, overviewLabel, colors.white, overviewBg)
@@ -388,7 +469,16 @@ local function drawTabs()
         y2 = 3,
     }
 
-    local machineX = 2 + #overviewLabel + 2
+    local linesX = 2 + #overviewLabel + 2
+    writeAt(linesX, 3, linesLabel, colors.white, linesBg)
+    tabLinesBounds = {
+        x1 = linesX,
+        x2 = linesX + #linesLabel - 1,
+        y1 = 3,
+        y2 = 3,
+    }
+
+    local machineX = linesX + #linesLabel + 2
     writeAt(machineX, 3, machinesLabel, colors.white, machinesBg)
     tabMachinesBounds = {
         x1 = machineX,
@@ -533,8 +623,74 @@ local function renderOverview(data)
     drawGlobalControls()
 end
 
+local function renderLines(data)
+    lineButtonBounds = {}
+
+    centered(5, "CONTROLE DES LIGNES", colors.cyan)
+
+    if #data.lines == 0 then
+        centered(8, "AUCUNE LIGNE CONFIGUREE", colors.orange)
+        return
+    end
+
+    local y = 7
+
+    for _, line in ipairs(data.lines) do
+        local stateColor = colors.orange
+        if line.state == "RUN" then stateColor = colors.lime end
+        if line.state == "STOP" then stateColor = colors.red end
+        if line.state == "MISSING" then stateColor = colors.lightGray end
+
+        writeAt(2, y, line.id, colors.white)
+        writeAt(14, y, "P:" .. shortName(line.pump, 18), colors.lightBlue)
+        writeAt(36, y, "S:" .. shortName(line.separator, 24), colors.cyan)
+
+        local stateX = math.max(62, width - 22)
+        writeAt(stateX, y, line.state, stateColor)
+
+        local buttonLabel
+        local targetMode
+        local buttonBg
+        local buttonFg
+
+        if line.state == "RUN" then
+            buttonLabel = "[ STOP ]"
+            targetMode = config.stopMode
+            buttonBg = colors.red
+            buttonFg = colors.white
+        else
+            buttonLabel = "[ START ]"
+            targetMode = "DISABLED"
+            buttonBg = colors.lime
+            buttonFg = colors.black
+        end
+
+        local buttonX = math.max(stateX + 8, width - #buttonLabel - 1)
+        writeAt(buttonX, y, buttonLabel, buttonFg, buttonBg)
+
+        table.insert(lineButtonBounds, {
+            x1 = buttonX,
+            x2 = buttonX + #buttonLabel - 1,
+            y1 = y,
+            y2 = y,
+            id = line.id,
+            targetMode = targetMode,
+        })
+
+        writeAt(
+            6,
+            y + 1,
+            ("Pump:%s  Separator:%s"):format(line.pumpState, line.separatorState),
+            colors.lightGray
+        )
+
+        y = y + 3
+    end
+end
+
 local function renderMachines(data)
     machineButtonBounds = {}
+    lineButtonBounds = {}
     prevBounds = nil
     nextBounds = nil
 
@@ -662,6 +818,8 @@ local function render()
 
     if currentPage == "machines" then
         renderMachines(data)
+    elseif currentPage == "lines" then
+        renderLines(data)
     else
         renderOverview(data)
     end
@@ -764,6 +922,27 @@ local function queueGlobalControl(targetMode, label)
     os.queueEvent("factory_control_request", "all", "", targetMode, label)
 end
 
+local function queueLineControl(button)
+    if updateInProgress or controlIsLocked() then return end
+
+    local now = os.epoch("utc") / 1000
+    local verb = button.targetMode == "DISABLED" and "START" or "STOP"
+
+    controlPending = button.id
+    controlPendingSince = now
+    actionMessage = verb .. " " .. button.id .. "..."
+    actionMessageUntil = now + 10
+    render()
+
+    os.queueEvent(
+        "factory_control_request",
+        "line",
+        button.id,
+        button.targetMode,
+        verb .. " " .. button.id
+    )
+end
+
 local function queueMachineControl(button)
     if updateInProgress or controlIsLocked() then return end
 
@@ -803,6 +982,10 @@ local function uiLoop()
                 currentPage = "overview"
                 render()
 
+            elseif inside(tabLinesBounds, x, y) then
+                currentPage = "lines"
+                render()
+
             elseif inside(tabMachinesBounds, x, y) then
                 currentPage = "machines"
                 render()
@@ -824,11 +1007,21 @@ local function uiLoop()
             else
                 local handled = false
 
-                for _, button in ipairs(machineButtonBounds) do
+                for _, button in ipairs(lineButtonBounds) do
                     if inside(button, x, y) then
-                        queueMachineControl(button)
+                        queueLineControl(button)
                         handled = true
                         break
+                    end
+                end
+
+                if not handled then
+                    for _, button in ipairs(machineButtonBounds) do
+                        if inside(button, x, y) then
+                            queueMachineControl(button)
+                            handled = true
+                            break
+                        end
                     end
                 end
 
@@ -858,6 +1051,8 @@ local function controlLoop()
         local protectedOK, ok, detail = pcall(function()
             if scope == "machine" then
                 return setMachineMode(targetName, targetMode)
+            elseif scope == "line" then
+                return setLineMode(targetName, targetMode)
             end
 
             return setProcessMode(targetMode)
