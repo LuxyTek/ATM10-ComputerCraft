@@ -35,9 +35,10 @@ while true do
 
     local active = 3
     local state = "RUN"
-    local reason = ("LOCAL H2 %.0f O2 %.0f"):format(h2 * 100, o2 * 100)
 
     local demand = math.min(h2, o2)
+    local demandName = h2 <= o2 and "H2" or "O2"
+    local reason = ("DEMAND %s %.0f%%"):format(demandName, demand * 100)
 
     if h2 >= 0.95 and o2 >= 0.95 then
         active = 0
