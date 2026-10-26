@@ -120,3 +120,17 @@ La V0.2 ajoute un pilotage manuel global des Electrolytic Separators depuis le m
 Important : le mode STOP utilise `HIGH` sans signal redstone externe. Un Separator recevant un signal redstone physique pourrait donc fonctionner malgre le STOP logiciel.
 
 Aucun automatisme de seuil n'est encore actif en V0.2.
+
+
+## V0.2.1 - Reactivite et demarrage automatique
+
+Correctifs alignes sur le dashboard V1 :
+
+- boucle UI separee de la collecte de telemetrie via `parallel.waitForAny` ;
+- les appels Mekanism ne bloquent plus la gestion des touches du monitor ;
+- updater base sur `http.request` et les evenements `http_success` / `http_failure` ;
+- timeout explicite des telechargements ;
+- `/startup.lua` permanent lance `/programs/factory/h2o2.lua` apres reboot ;
+- le fichier startup fait partie du manifeste de mise a jour.
+
+La configuration locale `/config/factory_h2o2.lua` reste preservee.
