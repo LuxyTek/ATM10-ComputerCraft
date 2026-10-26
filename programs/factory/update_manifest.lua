@@ -1,5 +1,5 @@
 return {
-    version = "0.7.1",
+    version = "0.7.2",
 
     -- Program files and startup are updated automatically.
     -- Runtime configuration remains preserved.
@@ -15,6 +15,10 @@ return {
         {
             remote = "programs/factory/lib/updater.lua",
             localPath = "/programs/factory/lib/updater.lua",
+        },
+        {
+            remote = "programs/factory/lib/status_bus.lua",
+            localPath = "/programs/factory/lib/status_bus.lua",
         },
         {
             remote = "programs/factory/update_manifest.lua",
