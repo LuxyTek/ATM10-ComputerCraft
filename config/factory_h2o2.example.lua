@@ -1,5 +1,9 @@
 return {
     refreshSeconds = 1,
+    textScale = 0.5,
+    monitor = nil,
+    stopMode = "HIGH", -- STOP logiciel, sans signal redstone externe sur les Separators.
+
 
     thresholds = {
         waterStop = 0.10,
