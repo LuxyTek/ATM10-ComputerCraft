@@ -1,6 +1,8 @@
 local PROGRAM_VERSION = "0.1.0"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_dashboard.lua"
+local UPDATER_PATH = "/programs/factory/lib/updater.lua"
+local UPDATE_MANIFEST = "programs/factory/dashboard_update_manifest.lua"
 
 local defaults = {
     refreshSeconds = 1,
@@ -69,6 +71,12 @@ local width, height = physicalMonitor.getSize()
 local monitor = window.create(physicalMonitor, 1, 1, width, height, false)
 
 local modules = {}
+
+local updateBounds = nil
+local updateConfirmUntil = 0
+local updateInProgress = false
+local updateMessage = nil
+local updateMessageUntil = 0
 
 local function nowSeconds()
     return os.epoch("utc") / 1000
@@ -139,7 +147,78 @@ local function sortedModules()
     return result
 end
 
-local function render()
+local render
+
+local function drawUpdateButton(now)
+    local label, fg, bg
+
+    if updateInProgress then
+        label = "[ MAJ... ]"
+        fg = colors.black
+        bg = colors.lime
+    elseif now < updateConfirmUntil then
+        label = "[ CONFIRMER ]"
+        fg = colors.black
+        bg = colors.orange
+    else
+        label = "[ MAJ ]"
+        fg = colors.white
+        bg = colors.blue
+    end
+
+    local x = math.max(2, width - #label - 1)
+    writeAt(x, height, label, fg, bg)
+    updateBounds = { x1 = x, x2 = x + #label - 1, y1 = height, y2 = height }
+end
+
+local function inside(bounds, x, y)
+    return bounds
+        and x >= bounds.x1
+        and x <= bounds.x2
+        and y >= bounds.y1
+        and y <= bounds.y2
+end
+
+local function doUpdate()
+    if not fs.exists(UPDATER_PATH) then
+        updateMessage = "UPDATER ABSENT"
+        updateMessageUntil = nowSeconds() + 6
+        return
+    end
+
+    local loaded, updater = pcall(dofile, UPDATER_PATH)
+    if not loaded or type(updater) ~= "table" or type(updater.update) ~= "function" then
+        updateMessage = "UPDATER INVALIDE"
+        updateMessageUntil = nowSeconds() + 6
+        return
+    end
+
+    updateInProgress = true
+    updateConfirmUntil = 0
+    render()
+
+    local ok, versionOrError = updater.update({
+        manifest = UPDATE_MANIFEST,
+    })
+
+    updateInProgress = false
+
+    if ok then
+        monitor.setBackgroundColor(colors.black)
+        monitor.setTextColor(colors.white)
+        monitor.clear()
+        centered(math.max(2, math.floor(height / 2) - 1), "MISE A JOUR OK", colors.lime)
+        centered(math.max(3, math.floor(height / 2) + 1), "Version " .. tostring(versionOrError), colors.lightGray)
+        sleep(1)
+        os.reboot()
+        return
+    end
+
+    updateMessage = "ECHEC MAJ"
+    updateMessageUntil = nowSeconds() + 6
+end
+
+render = function()
     local now = nowSeconds()
 
     monitor.setVisible(false)
@@ -216,7 +295,18 @@ local function render()
         end
     end
 
-    writeAt(2, height, ("Rednet:%d modem(s) | %s"):format(modemCount, STATUS_PROTOCOL), colors.gray)
+    local footer = ("Rednet:%d | %s"):format(modemCount, STATUS_PROTOCOL)
+    writeAt(2, height, footer, colors.gray)
+
+    if updateMessage and now < updateMessageUntil then
+        local x = math.max(2, width - #updateMessage - 1)
+        writeAt(x, height, updateMessage, colors.red, colors.black)
+        updateBounds = nil
+    else
+        updateMessage = nil
+        drawUpdateButton(now)
+    end
+
     monitor.setVisible(true)
 end
 
@@ -244,11 +334,23 @@ local function uiLoop()
     render()
 
     while true do
-        local event = os.pullEvent()
+        local event, p1, p2, p3 = os.pullEvent()
 
         if event == "factory_dashboard_refresh" then
             render()
-        elseif event == "monitor_touch" then
+
+        elseif event == "monitor_touch" and p1 == monitorName then
+            local x, y = p2, p3
+            local now = nowSeconds()
+
+            if inside(updateBounds, x, y) and not updateInProgress then
+                if now < updateConfirmUntil then
+                    doUpdate()
+                else
+                    updateConfirmUntil = now + 8
+                end
+            end
+
             render()
         end
     end
