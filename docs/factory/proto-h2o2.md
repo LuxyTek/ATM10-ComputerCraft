@@ -499,3 +499,32 @@ O2 atteint 95 %
 => les deux buffers sont pleins
 => arret normal du module
 ```
+
+
+## V0.7.9 - Etats actifs vs detectes
+
+Correction de semantique dans l'Overview.
+
+L'ancien affichage :
+
+```text
+Separators : 3/3 online
+PROCESS CONTROL : MIXED
+```
+
+etait ambigu lorsqu'une ligne etait volontairement arretee par l'AUTO.
+
+Le module distingue maintenant :
+
+- Separators actifs : machines en etat RUN ;
+- Separators detectes : peripheriques presents et repondant a la telemetrie ;
+- etat du process base sur les lignes logiques.
+
+Exemple avec 2 lignes actives sur 3 :
+
+```text
+PROCESS : RUN 2/3 LINES
+Separators : 2/3 actifs | 3/3 detectes
+```
+
+`MIXED` est reserve aux vraies incoherences de ligne, par exemple Pump RUN + Separator STOP ou machine manquante.
