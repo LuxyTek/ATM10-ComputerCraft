@@ -11,16 +11,23 @@ return {
     },
 
 
-    thresholds = {
+    auto = {
+        checkSeconds = 2,
+
+        -- Securite eau : arret sous 10 %, reprise seulement au-dessus de 40 %.
         waterStop = 0.10,
         waterResume = 0.40,
 
-        energyStop = 0.15,
-        energyResume = 0.30,
-
+        -- Le buffer le plus rempli entre H2 et O2 pilote la production.
         chemicalStop = 0.95,
         chemicalResume = 0.80,
+
+        -- Regulation progressive des 3 lignes.
+        scaleToTwo = 0.30,
+        scaleToOne = 0.70,
+        stageHysteresis = 0.05,
     },
+
 
     -- Les noms reels seront renseignes apres peripheral_probe.lua.
     devices = {
