@@ -36,9 +36,10 @@ return {
         scaleToOne = 0.70,
         stageHysteresis = 0.05,
 
-        -- Anti-blocage pilote par le buffer INTERNE de chaque Separator.
-        -- Demarre le dump avant saturation, puis le maintient jusqu'a
-        -- evacuation suffisante du buffer interne.
+        -- Protection interne secondaire des Separators.
+        -- Si un buffer interne approche de la saturation, dump temporaire.
+        -- Le maintien continu d'un surplus externe utilise chemicalStop /
+        -- chemicalResume ci-dessus.
         overflowEnable = 0.80,
         overflowDisable = 0.20,
     },
