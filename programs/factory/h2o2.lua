@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.7.5"
+local PROGRAM_VERSION = "0.7.6"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
@@ -319,6 +319,10 @@ local function collectData()
             waterFill = safeCall(item.dev, "getInputFilledPercentage"),
             hydrogenFill = h2Fill,
             oxygenFill = o2Fill,
+            leftChemical = type(left) == "table" and left.name or nil,
+            rightChemical = type(right) == "table" and right.name or nil,
+            leftDumpMode = safeCall(item.dev, "getLeftOutputDumpingMode"),
+            rightDumpMode = safeCall(item.dev, "getRightOutputDumpingMode"),
         })
     end
 
@@ -894,6 +898,20 @@ local function compact(value, unit)
     return string.format("%.0f%s", value, unit or "")
 end
 
+local function shortChemical(name)
+    if name == "mekanism:hydrogen" then return "H2" end
+    if name == "mekanism:oxygen" then return "O2" end
+    if not name or name == "" then return "EMPTY" end
+    return tostring(name):gsub("^mekanism:", ""):upper()
+end
+
+local function shortDumpMode(mode)
+    if mode == "DUMPING" then return "DUMP" end
+    if mode == "DUMPING_EXCESS" then return "EXCESS" end
+    if mode == "IDLE" then return "IDLE" end
+    return tostring(mode or "N/A")
+end
+
 local function machinePct(value)
     if type(value) ~= "number" then return "N/A" end
     return string.format("%.1f%%", math.max(0, math.min(1, value)) * 100)
@@ -1205,7 +1223,7 @@ local function renderMachines(data)
 
     local firstY = 7
     local footerReserve = 4
-    local rowsPerMachine = 2
+    local rowsPerMachine = 3
     local machinesPerPage = math.max(
         1,
         math.floor((height - firstY - footerReserve + 1) / rowsPerMachine)
@@ -1298,6 +1316,14 @@ local function renderMachines(data)
                     machinePct(machine.oxygenFill)
                 )
                 writeAt(8, y + 1, detail, colors.lightGray)
+
+                local dumpDetail = ("LEFT %s:%s   RIGHT %s:%s"):format(
+                    shortChemical(machine.leftChemical),
+                    shortDumpMode(machine.leftDumpMode),
+                    shortChemical(machine.rightChemical),
+                    shortDumpMode(machine.rightDumpMode)
+                )
+                writeAt(8, y + 2, dumpDetail, colors.gray)
             end
 
             y = y + rowsPerMachine
