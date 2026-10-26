@@ -1,6 +1,7 @@
-local PROGRAM_VERSION = "0.7.1"
+local PROGRAM_VERSION = "0.7.2"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
+local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 
 local defaults = {
     refreshSeconds = 1,
@@ -28,6 +29,13 @@ local defaults = {
         scaleToTwo = 0.30,
         scaleToOne = 0.70,
         stageHysteresis = 0.05,
+    },
+
+    status = {
+        publishSeconds = 2,
+        id = "h2o2",
+        label = "H2/O2",
+        type = "process",
     },
 }
 
@@ -583,6 +591,127 @@ local function applyAutoTarget(data, targetLines)
     end
 
     return allOK, changed
+end
+
+local function moduleStatusReason(data)
+    if operatingMode == "MANUAL" then
+        return "MANUAL CONTROL"
+    end
+
+    if autoState.reason == "FAULT CONTROL" then
+        return "FAULT CONTROL"
+    end
+
+    if autoState.waterHold then
+        local fill = ratio(data.water, data.waterCapacity)
+        return ("HOLD WATER %.0f%%"):format(fill * 100)
+    end
+
+    if autoState.chemicalHold then
+        return "BUFFER HOLD"
+    end
+
+    local h2Fill = ratio(data.hydrogen, data.hydrogenCapacity)
+    local o2Fill = ratio(data.oxygen, data.oxygenCapacity)
+
+    if h2Fill >= config.auto.chemicalStop
+        and o2Fill >= config.auto.chemicalStop then
+        return "BUFFER FULL"
+    end
+
+    local demandName = h2Fill <= o2Fill and "H2" or "O2"
+    local demandFill = math.min(h2Fill, o2Fill)
+
+    return ("DEMAND %s %.0f%%"):format(demandName, demandFill * 100)
+end
+
+local function buildModuleStatus(data)
+    local activeLines = 0
+    local hasMissing = false
+    local hasMixed = false
+    local alarms = {}
+
+    for _, line in ipairs(data.lines or {}) do
+        if line.state == "RUN" then
+            activeLines = activeLines + 1
+        elseif line.state == "MISSING" then
+            hasMissing = true
+        elseif line.state == "MIXED" then
+            hasMixed = true
+        end
+    end
+
+    local devices = data.devices
+    local criticalMissing =
+        #devices.separators == 0
+        or #devices.pumps == 0
+        or #devices.waterTanks == 0
+        or #devices.hydrogenTanks == 0
+        or #devices.oxygenTanks == 0
+
+    local health = "OK"
+
+    if criticalMissing or hasMissing or autoState.reason == "FAULT CONTROL" then
+        health = "FAULT"
+    elseif hasMixed or data.separatorOnline < #devices.separators then
+        health = "WARN"
+    end
+
+    if criticalMissing then table.insert(alarms, "CRITICAL PERIPHERAL MISSING") end
+    if hasMissing then table.insert(alarms, "LINE MISSING") end
+    if hasMixed then table.insert(alarms, "LINE MIXED") end
+    if autoState.reason == "FAULT CONTROL" then table.insert(alarms, "CONTROL FAILURE") end
+
+    local state
+
+    if activeLines > 0 then
+        state = "RUN"
+    elseif operatingMode == "AUTO"
+        and (autoState.waterHold or autoState.chemicalHold) then
+        state = "HOLD"
+    elseif operatingMode == "MANUAL" and data.controlState == "STOP" then
+        state = "STOP"
+    else
+        state = "IDLE"
+    end
+
+    return {
+        contract = 1,
+        id = config.status.id,
+        label = config.status.label,
+        type = config.status.type,
+        version = PROGRAM_VERSION,
+
+        mode = operatingMode,
+        state = state,
+        health = health,
+        reason = moduleStatusReason(data),
+
+        activeLines = activeLines,
+        totalLines = #(config.lines or {}),
+
+        metrics = {
+            water = ratio(data.water, data.waterCapacity),
+            hydrogen = ratio(data.hydrogen, data.hydrogenCapacity),
+            oxygen = ratio(data.oxygen, data.oxygenCapacity),
+        },
+
+        alarms = alarms,
+    }
+end
+
+local function loadStatusBus()
+    if not fs.exists(STATUS_BUS_PATH) then
+        return nil
+    end
+
+    local ok, bus = pcall(dofile, STATUS_BUS_PATH)
+
+    if ok and type(bus) == "table" and type(bus.broadcastStatus) == "function" then
+        return bus
+    end
+
+    return nil
 end
 
 local function compact(value, unit)
@@ -1362,6 +1491,23 @@ local function autoLoop()
     end
 end
 
+local function statusLoop()
+    local statusBus = loadStatusBus()
+
+    while true do
+        if not statusBus then
+            statusBus = loadStatusBus()
+        end
+
+        if statusBus and dataCache then
+            local packet = buildModuleStatus(dataCache)
+            pcall(statusBus.broadcastStatus, packet)
+        end
+
+        sleep(config.status.publishSeconds)
+    end
+end
+
 local function dataLoop()
     while true do
         local ok, freshData = pcall(collectData)
@@ -1382,4 +1528,4 @@ local function dataLoop()
     end
 end
 
-parallel.waitForAny(uiLoop, dataLoop, controlLoop, autoLoop)
+parallel.waitForAny(uiLoop, dataLoop, controlLoop, autoLoop, statusLoop)
