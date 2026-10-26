@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.7.4"
+local PROGRAM_VERSION = "0.7.5"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
@@ -718,12 +718,12 @@ local function updateOverflowState(data, targetLines)
 
         local h2Mode =
             lineIsActive and autoState.overflowHydrogen
-            and "DUMPING_EXCESS"
+            and "DUMPING"
             or "IDLE"
 
         local o2Mode =
             lineIsActive and autoState.overflowOxygen
-            and "DUMPING_EXCESS"
+            and "DUMPING"
             or "IDLE"
 
         local h2Side = separatorChemicalSide(separator.dev, "mekanism:hydrogen")
@@ -764,11 +764,11 @@ local function moduleStatusReason(data)
     end
 
     if autoState.overflowHydrogen then
-        return "H2 EXCESS -> O2"
+        return "DUMP H2 -> O2"
     end
 
     if autoState.overflowOxygen then
-        return "O2 EXCESS -> H2"
+        return "DUMP O2 -> H2"
     end
 
     local h2Fill = ratio(data.hydrogen, data.hydrogenCapacity)
