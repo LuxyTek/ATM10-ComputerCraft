@@ -2,7 +2,13 @@ return {
     refreshSeconds = 1,
     textScale = 0.5,
     monitor = nil,
-    stopMode = "HIGH", -- STOP logiciel, sans signal redstone externe sur les Separators.
+    stopMode = "HIGH", -- STOP logiciel, sans signal redstone externe sur les machines.
+
+    lines = {
+        { id = "LINE 1", pump = "electricPump_2", separator = "electrolyticSeparator_2" },
+        { id = "LINE 2", pump = "electricPump_1", separator = "electrolyticSeparator_0" },
+        { id = "LINE 3", pump = "electricPump_0", separator = "electrolyticSeparator_1" },
+    },
 
 
     thresholds = {
