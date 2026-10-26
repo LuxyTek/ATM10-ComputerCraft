@@ -1,5 +1,5 @@
 return {
-    version = "0.7.4",
+    version = "0.7.5",
 
     -- Program files and startup are updated automatically.
     -- Runtime configuration remains preserved.
