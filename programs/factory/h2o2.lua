@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.6.0"
+local PROGRAM_VERSION = "0.6.1"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 
@@ -243,10 +243,10 @@ local function collectData()
         })
     end
 
-    table.sort(machines, function(a, b)
-        if a.kind == b.kind then return a.name < b.name end
-        return a.kind < b.kind
-    end)
+    local lineOrder = {}
+    for index, lineCfg in ipairs(config.lines or {}) do
+        lineOrder[lineCfg.id] = index
+    end
 
     local machineByName = {}
     for _, machine in ipairs(machines) do
@@ -277,6 +277,33 @@ local function collectData()
             state = state,
         })
     end
+
+    table.sort(machines, function(a, b)
+        local aOrder = a.lineId and lineOrder[a.lineId] or math.huge
+        local bOrder = b.lineId and lineOrder[b.lineId] or math.huge
+
+        if aOrder ~= bOrder then
+            return aOrder < bOrder
+        end
+
+        if a.lineId ~= b.lineId then
+            return tostring(a.lineId or "") < tostring(b.lineId or "")
+        end
+
+        local kindOrder = {
+            PUMP = 1,
+            SEP = 2,
+        }
+
+        local aKind = kindOrder[a.kind] or 99
+        local bKind = kindOrder[b.kind] or 99
+
+        if aKind ~= bKind then
+            return aKind < bKind
+        end
+
+        return a.name < b.name
+    end)
 
     return {
         devices = devices,
