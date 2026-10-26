@@ -435,3 +435,26 @@ Rappel confirme par le code Mekanism 1.21.x :
 - le debit de dump est augmente avec les Speed Upgrades.
 
 Ainsi, si le buffer H2 remonte encore instantanement alors que `RIGHT H2:DUMP` est effectivement affiche, le probleme ne vient plus de la commande CC mais d'un comportement/debit reel du Separator ou de sa configuration. Si l'ecran affiche `RIGHT H2:IDLE`, le diagnostic pointera au contraire un probleme d'application de la commande.
+
+
+## V0.7.7 - Overflow pilote par les buffers internes
+
+Le diagnostic V0.7.6 a montre sur l'installation reelle :
+
+```text
+LEFT H2:IDLE   RIGHT EMPTY:IDLE
+```
+
+Le probleme n'etait donc pas un manque de debit de `DUMPING`, mais le fait que l'overflow etait decide depuis le Chemical Tank externe alors que le blocage se produit d'abord dans le buffer interne du Separator.
+
+Nouvelle logique :
+
+- chaque Separator actif est surveille individuellement ;
+- le remplissage interne H2/O2 pilote directement le dump ;
+- a partir de 80 % interne, le gaz qui menace de saturer passe en `DUMPING` si l'autre gaz est encore demande ;
+- le dump reste actif jusqu'a 20 % interne pour eviter le cycle marche/arret rapide ;
+- l'orientation H2/O2 gauche/droite est apprise dynamiquement depuis les chemicals reellement observes ;
+- cette orientation apprise est reutilisee pour les autres Separators lorsque leur buffer est vide ;
+- aucune orientation gauche/droite n'est desormais imposee par un fallback statique.
+
+Cela permet au controleur de s'adapter au comportement reel expose par les peripheriques CC de l'installation.
