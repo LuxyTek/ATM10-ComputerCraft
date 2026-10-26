@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.7.6"
+local PROGRAM_VERSION = "0.7.7"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
@@ -32,8 +32,11 @@ local defaults = {
 
         -- Evite qu'un gaz sature les buffers internes des Separators
         -- et bloque la production de l'autre gaz.
-        overflowEnable = 0.98,
-        overflowDisable = 0.90,
+        -- Anti-blocage base sur les buffers INTERNES des Separators.
+        -- Le dump commence avant saturation et reste actif jusqu'a
+        -- evacuation suffisante du buffer interne.
+        overflowEnable = 0.80,
+        overflowDisable = 0.20,
     },
 
     status = {
@@ -127,6 +130,7 @@ local autoState = {
 
 local dataCache = nil
 local overflowResetPending = true
+local separatorOutputMap = {}
 
 local function safeCall(device, method, ...)
     if not device or type(device[method]) ~= "function" then return nil end
@@ -292,26 +296,36 @@ local function collectData()
         local leftFill = safeCall(item.dev, "getLeftOutputFilledPercentage")
         local rightFill = safeCall(item.dev, "getRightOutputFilledPercentage")
 
+        local leftChemical = type(left) == "table" and left.name or nil
+        local rightChemical = type(right) == "table" and right.name or nil
+
+        local mapping = separatorOutputMap[item.name] or {}
+
+        if leftChemical == "mekanism:hydrogen" then
+            mapping.hydrogen = "LEFT"
+            mapping.oxygen = "RIGHT"
+        elseif leftChemical == "mekanism:oxygen" then
+            mapping.oxygen = "LEFT"
+            mapping.hydrogen = "RIGHT"
+        end
+
+        if rightChemical == "mekanism:hydrogen" then
+            mapping.hydrogen = "RIGHT"
+            mapping.oxygen = "LEFT"
+        elseif rightChemical == "mekanism:oxygen" then
+            mapping.oxygen = "RIGHT"
+            mapping.hydrogen = "LEFT"
+        end
+
+        separatorOutputMap[item.name] = mapping
+
         local h2Fill = nil
         local o2Fill = nil
 
-        if type(left) == "table" and left.name == "mekanism:hydrogen" then
-            h2Fill = leftFill
-        elseif type(left) == "table" and left.name == "mekanism:oxygen" then
-            o2Fill = leftFill
-        end
-
-        if type(right) == "table" and right.name == "mekanism:hydrogen" then
-            h2Fill = rightFill
-        elseif type(right) == "table" and right.name == "mekanism:oxygen" then
-            o2Fill = rightFill
-        end
-
-        -- Mapping Mekanism 1.21.x de l'Electrolytic Separator :
-        -- gauche = O2, droite = H2. Utilise seulement comme fallback
-        -- quand un buffer vide ne fournit pas de chemical identifiable.
-        if o2Fill == nil then o2Fill = leftFill end
-        if h2Fill == nil then h2Fill = rightFill end
+        if mapping.hydrogen == "LEFT" then h2Fill = leftFill end
+        if mapping.hydrogen == "RIGHT" then h2Fill = rightFill end
+        if mapping.oxygen == "LEFT" then o2Fill = leftFill end
+        if mapping.oxygen == "RIGHT" then o2Fill = rightFill end
 
         table.insert(machines, {
             kind = "SEP",
@@ -320,8 +334,12 @@ local function collectData()
             waterFill = safeCall(item.dev, "getInputFilledPercentage"),
             hydrogenFill = h2Fill,
             oxygenFill = o2Fill,
-            leftChemical = type(left) == "table" and left.name or nil,
-            rightChemical = type(right) == "table" and right.name or nil,
+            hydrogenSide = mapping.hydrogen,
+            oxygenSide = mapping.oxygen,
+            leftFill = leftFill,
+            rightFill = rightFill,
+            leftChemical = leftChemical,
+            rightChemical = rightChemical,
             leftDumpMode = safeCall(item.dev, "getLeftOutputDumpingMode"),
             rightDumpMode = safeCall(item.dev, "getRightOutputDumpingMode"),
         })
@@ -637,22 +655,37 @@ local function applyAutoTarget(data, targetLines)
     return allOK, changed
 end
 
-local function separatorChemicalSide(device, chemicalName)
+local function separatorChemicalSide(separatorName, device, chemicalName)
     local left = safeCall(device, "getLeftOutput")
     local right = safeCall(device, "getRightOutput")
 
-    if type(left) == "table" and left.name == chemicalName then
-        return "LEFT"
+    local leftName = type(left) == "table" and left.name or nil
+    local rightName = type(right) == "table" and right.name or nil
+    local mapping = separatorOutputMap[separatorName] or {}
+
+    if leftName == "mekanism:hydrogen" then
+        mapping.hydrogen = "LEFT"
+        mapping.oxygen = "RIGHT"
+    elseif leftName == "mekanism:oxygen" then
+        mapping.oxygen = "LEFT"
+        mapping.hydrogen = "RIGHT"
     end
 
-    if type(right) == "table" and right.name == chemicalName then
-        return "RIGHT"
+    if rightName == "mekanism:hydrogen" then
+        mapping.hydrogen = "RIGHT"
+        mapping.oxygen = "LEFT"
+    elseif rightName == "mekanism:oxygen" then
+        mapping.oxygen = "RIGHT"
+        mapping.hydrogen = "LEFT"
     end
 
-    -- Le module est explicitement H2/O2 sur eau.
-    -- Mapping Mekanism 1.21.x : O2 a gauche, H2 a droite.
-    if chemicalName == "mekanism:hydrogen" then return "RIGHT" end
-    if chemicalName == "mekanism:oxygen" then return "LEFT" end
+    separatorOutputMap[separatorName] = mapping
+
+    if chemicalName == "mekanism:hydrogen" then
+        return mapping.hydrogen
+    elseif chemicalName == "mekanism:oxygen" then
+        return mapping.oxygen
+    end
 
     return nil
 end
@@ -703,31 +736,10 @@ local function setSeparatorOutputDumpingMode(device, side, mode)
 end
 
 local function updateOverflowState(data, targetLines)
-    local h2Fill = ratio(data.hydrogen, data.hydrogenCapacity)
-    local o2Fill = ratio(data.oxygen, data.oxygenCapacity)
+    local h2External = ratio(data.hydrogen, data.hydrogenCapacity)
+    local o2External = ratio(data.oxygen, data.oxygenCapacity)
     local enable = config.auto.overflowEnable
     local disable = config.auto.overflowDisable
-
-    if targetLines <= 0 then
-        autoState.overflowHydrogen = false
-        autoState.overflowOxygen = false
-    else
-        if autoState.overflowHydrogen then
-            if h2Fill <= disable or o2Fill >= config.auto.chemicalStop then
-                autoState.overflowHydrogen = false
-            end
-        elseif h2Fill >= enable and o2Fill < config.auto.chemicalStop then
-            autoState.overflowHydrogen = true
-        end
-
-        if autoState.overflowOxygen then
-            if o2Fill <= disable or h2Fill >= config.auto.chemicalStop then
-                autoState.overflowOxygen = false
-            end
-        elseif o2Fill >= enable and h2Fill < config.auto.chemicalStop then
-            autoState.overflowOxygen = true
-        end
-    end
 
     local activeSeparators = {}
     for index, lineCfg in ipairs(config.lines or {}) do
@@ -736,38 +748,83 @@ local function updateOverflowState(data, targetLines)
         end
     end
 
+    local machineByName = {}
+    for _, machine in ipairs(data.machines or {}) do
+        machineByName[machine.name] = machine
+    end
+
+    local anyH2Dump = false
+    local anyO2Dump = false
     local allOK = true
+    autoState.overflowError = nil
 
     for _, separator in ipairs(data.devices.separators or {}) do
+        local machine = machineByName[separator.name]
         local lineIsActive = activeSeparators[separator.name] == true
 
-        local h2Mode =
-            lineIsActive and autoState.overflowHydrogen
-            and "DUMPING"
-            or "IDLE"
+        local h2Side =
+            machine and machine.hydrogenSide
+            or separatorChemicalSide(separator.name, separator.dev, "mekanism:hydrogen")
 
-        local o2Mode =
-            lineIsActive and autoState.overflowOxygen
-            and "DUMPING"
-            or "IDLE"
+        local o2Side =
+            machine and machine.oxygenSide
+            or separatorChemicalSide(separator.name, separator.dev, "mekanism:oxygen")
 
-        local h2Side = separatorChemicalSide(separator.dev, "mekanism:hydrogen")
-        local o2Side = separatorChemicalSide(separator.dev, "mekanism:oxygen")
+        local h2Internal = machine and machine.hydrogenFill or nil
+        local o2Internal = machine and machine.oxygenFill or nil
+
+        local currentH2Dump =
+            h2Side == "LEFT" and machine and machine.leftDumpMode == "DUMPING"
+            or h2Side == "RIGHT" and machine and machine.rightDumpMode == "DUMPING"
+
+        local currentO2Dump =
+            o2Side == "LEFT" and machine and machine.leftDumpMode == "DUMPING"
+            or o2Side == "RIGHT" and machine and machine.rightDumpMode == "DUMPING"
+
+        local needO2 = o2External < config.auto.chemicalStop
+        local needH2 = h2External < config.auto.chemicalStop
+
+        local dumpH2 = false
+        local dumpO2 = false
+
+        if lineIsActive and needO2 and type(h2Internal) == "number" then
+            if currentH2Dump then
+                dumpH2 = h2Internal > disable
+            else
+                dumpH2 = h2Internal >= enable
+            end
+        end
+
+        if lineIsActive and needH2 and type(o2Internal) == "number" then
+            if currentO2Dump then
+                dumpO2 = o2Internal > disable
+            else
+                dumpO2 = o2Internal >= enable
+            end
+        end
+
+        local h2Mode = dumpH2 and "DUMPING" or "IDLE"
+        local o2Mode = dumpO2 and "DUMPING" or "IDLE"
 
         local h2OK, h2Error =
             setSeparatorOutputDumpingMode(separator.dev, h2Side, h2Mode)
         local o2OK, o2Error =
             setSeparatorOutputDumpingMode(separator.dev, o2Side, o2Mode)
 
+        if dumpH2 then anyH2Dump = true end
+        if dumpO2 then anyO2Dump = true end
+
         if not h2OK or not o2OK then
             allOK = false
             autoState.overflowError =
-                (separator.name .. " " .. tostring(h2Error or o2Error))
+                separator.name .. " " .. tostring(h2Error or o2Error)
         end
     end
 
+    autoState.overflowHydrogen = anyH2Dump
+    autoState.overflowOxygen = anyO2Dump
     autoState.overflowFault = not allOK
-    if allOK then autoState.overflowError = nil end
+
     return allOK
 end
 
