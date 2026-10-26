@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.5.1"
+local PROGRAM_VERSION = "0.6.0"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 
@@ -56,7 +56,6 @@ local currentPage = "overview"
 local machinePage = 1
 
 local tabOverviewBounds = nil
-local tabLinesBounds = nil
 local tabMachinesBounds = nil
 local updateBounds = nil
 local startBounds = nil
@@ -453,11 +452,9 @@ end
 
 local function drawTabs()
     local overviewLabel = "[ OVERVIEW ]"
-    local linesLabel = "[ LINES ]"
     local machinesLabel = "[ MACHINES ]"
 
     local overviewBg = currentPage == "overview" and colors.blue or colors.gray
-    local linesBg = currentPage == "lines" and colors.blue or colors.gray
     local machinesBg = currentPage == "machines" and colors.blue or colors.gray
 
     writeAt(2, 3, overviewLabel, colors.white, overviewBg)
@@ -468,16 +465,7 @@ local function drawTabs()
         y2 = 3,
     }
 
-    local linesX = 2 + #overviewLabel + 2
-    writeAt(linesX, 3, linesLabel, colors.white, linesBg)
-    tabLinesBounds = {
-        x1 = linesX,
-        x2 = linesX + #linesLabel - 1,
-        y1 = 3,
-        y2 = 3,
-    }
-
-    local machineX = linesX + #linesLabel + 2
+    local machineX = 2 + #overviewLabel + 2
     writeAt(machineX, 3, machinesLabel, colors.white, machinesBg)
     tabMachinesBounds = {
         x1 = machineX,
@@ -619,20 +607,22 @@ local function renderOverview(data)
 
     writeAt(2, 19, ("Pumps      : %d"):format(#devices.pumps), colors.lightGray)
 
+    drawLineBlock(data)
     drawGlobalControls()
 end
 
-local function renderLines(data)
+local function drawLineBlock(data)
     lineButtonBounds = {}
 
-    centered(5, "CONTROLE DES LIGNES", colors.cyan)
+    local titleY = math.max(20, height - 8)
+    writeAt(2, titleY, "LINES", colors.cyan)
 
     if #data.lines == 0 then
-        centered(8, "AUCUNE LIGNE CONFIGUREE", colors.orange)
+        writeAt(10, titleY, "AUCUNE", colors.orange)
         return
     end
 
-    local y = 8
+    local y = titleY + 1
 
     for _, line in ipairs(data.lines) do
         local stateColor = colors.orange
@@ -640,9 +630,9 @@ local function renderLines(data)
         if line.state == "STOP" then stateColor = colors.red end
         if line.state == "MISSING" then stateColor = colors.lightGray end
 
-        writeAt(6, y, line.id, colors.white)
+        writeAt(4, y, line.id, colors.white)
 
-        local stateX = math.max(26, math.floor(width / 2))
+        local stateX = 16
         writeAt(stateX, y, line.state, stateColor)
 
         local buttonLabel
@@ -662,7 +652,7 @@ local function renderLines(data)
             buttonFg = colors.black
         end
 
-        local buttonX = width - #buttonLabel - 4
+        local buttonX = 28
         writeAt(buttonX, y, buttonLabel, buttonFg, buttonBg)
 
         table.insert(lineButtonBounds, {
@@ -674,9 +664,10 @@ local function renderLines(data)
             targetMode = targetMode,
         })
 
-        y = y + 3
+        y = y + 1
     end
 end
+
 
 local function renderMachines(data)
     machineButtonBounds = {}
@@ -813,8 +804,6 @@ local function render()
 
     if currentPage == "machines" then
         renderMachines(data)
-    elseif currentPage == "lines" then
-        renderLines(data)
     else
         renderOverview(data)
     end
@@ -975,10 +964,6 @@ local function uiLoop()
 
             if inside(tabOverviewBounds, x, y) then
                 currentPage = "overview"
-                render()
-
-            elseif inside(tabLinesBounds, x, y) then
-                currentPage = "lines"
                 render()
 
             elseif inside(tabMachinesBounds, x, y) then
