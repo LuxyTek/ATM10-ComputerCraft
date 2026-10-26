@@ -170,3 +170,17 @@ Une page `MACHINES` complete le controle global du module.
 
 Cette version ne cree volontairement aucune association Pump <-> Separator a partir des suffixes de noms CC.
 La future notion de ligne utilisera une association logique explicite afin de rester fiable apres modification ou remplacement d'une machine.
+
+
+## V0.4.1 - Fiabilite des commandes
+
+Correction d'un cas ou les controles pouvaient rester bloques apres plusieurs START/STOP.
+
+- suppression du `parallel.waitForAll` imbrique pour les commandes globales ;
+- les ordres vers les machines sont envoyes de facon sequentielle dans la boucle de controle, tandis que l'UI reste independante et reactive ;
+- toutes les commandes sont encapsulees dans `pcall` ;
+- le verrou `controlPending` est toujours libere apres une commande, y compris en cas d'erreur ;
+- watchdog de 5 secondes : un verrou reste trop longtemps est automatiquement reinitialise ;
+- la collecte de telemetrie est protegee afin qu'une erreur peripherique transitoire ne termine pas le programme.
+
+Cette version vise la robustesse avant l'ajout des lignes logiques.
