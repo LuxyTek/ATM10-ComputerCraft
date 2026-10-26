@@ -1,9 +1,13 @@
 return {
-    version = "0.1.0-dev",
+    version = "0.1.0",
 
     -- Only program files are updated automatically.
     -- Runtime configuration is deliberately preserved.
     files = {
+        {
+            remote = "programs/factory/h2o2.lua",
+            localPath = "/programs/factory/h2o2.lua",
+        },
         {
             remote = "programs/factory/peripheral_probe.lua",
             localPath = "/programs/factory/peripheral_probe.lua",
