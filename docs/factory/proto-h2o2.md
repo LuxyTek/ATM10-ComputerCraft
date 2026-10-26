@@ -184,3 +184,27 @@ Correction d'un cas ou les controles pouvaient rester bloques apres plusieurs ST
 - la collecte de telemetrie est protegee afin qu'une erreur peripherique transitoire ne termine pas le programme.
 
 Cette version vise la robustesse avant l'ajout des lignes logiques.
+
+
+## V0.5.0 - Lignes logiques
+
+Ajout d'un niveau de controle entre le module complet et les machines individuelles.
+
+Mapping confirme :
+
+- LINE 1 : `electricPump_2` + `electrolyticSeparator_2`
+- LINE 2 : `electricPump_1` + `electrolyticSeparator_0`
+- LINE 3 : `electricPump_0` + `electrolyticSeparator_1`
+
+La page `LINES` affiche l'etat de chaque couple et permet un START / STOP par ligne.
+
+Etats :
+
+- `RUN` : Pump + Separator en marche ;
+- `STOP` : Pump + Separator arretes ;
+- `MIXED` : les deux machines n'ont pas le meme etat ;
+- `MISSING` : une des deux machines n'est pas presente sur le reseau.
+
+Le mapping est porte par la configuration et n'est pas deduit des suffixes CC.
+
+Correction UI incluse : chaque ecriture revient sur un fond noir par defaut, ce qui supprime les bandes rouges/vertes heritees des boutons.
