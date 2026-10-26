@@ -11,6 +11,13 @@ return {
     },
 
 
+    status = {
+        publishSeconds = 2,
+        id = "h2o2",
+        label = "H2/O2",
+        type = "process",
+    },
+
     auto = {
         checkSeconds = 2,
 
