@@ -458,3 +458,44 @@ Nouvelle logique :
 - aucune orientation gauche/droite n'est desormais imposee par un fallback statique.
 
 Cela permet au controleur de s'adapter au comportement reel expose par les peripheriques CC de l'installation.
+
+
+## V0.7.8 - Dump persistant du coproduit sature
+
+Le test V0.7.7 a confirme que le dump interne fonctionnait, mais qu'il s'arretait trop tot : apres retour sous 20 % interne, le Separator recommencait a produire le gaz dont le Chemical Tank externe etait toujours plein, puis resaturait quelques secondes plus tard.
+
+La regulation utilise maintenant deux niveaux distincts :
+
+### Surplus externe persistant
+
+Exemple H2 plein / O2 encore demande :
+
+- si H2 local externe atteint `chemicalStop` (95 %) et O2 reste sous 95 %, le module active un maintien `surplusHydrogenHold` ;
+- les Separators des lignes actives gardent alors la sortie H2 en `DUMPING` en continu ;
+- ce maintien ne s'arrete que lorsque :
+  - H2 externe redescend a `chemicalResume` (80 %) ou moins ;
+  - ou O2 atteint `chemicalStop` (95 %) ;
+  - ou aucune ligne ne doit plus tourner.
+
+La logique est symetrique si O2 sature avant H2.
+
+### Securite interne secondaire
+
+En dehors d'un surplus externe persistant :
+
+- un buffer interne de Separator >= 80 % declenche temporairement `DUMPING` ;
+- le dump reste actif jusqu'a <= 20 % interne ;
+- cette securite evite une saturation locale transitoire.
+
+Cas attendu :
+
+```text
+H2 externe 100 % / O2 externe 65 %
+=> H2 DUMP maintenu en continu
+=> pas de retour IDLE a 20 % interne
+=> O2 continue a monter
+
+O2 atteint 95 %
+=> les deux buffers sont pleins
+=> arret normal du module
+```
