@@ -806,6 +806,7 @@ local function render()
     startBounds = nil
     stopBounds = nil
     machineButtonBounds = {}
+    lineButtonBounds = {}
     prevBounds = nil
     nextBounds = nil
 
