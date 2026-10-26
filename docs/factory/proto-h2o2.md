@@ -241,3 +241,38 @@ La page `MACHINES` est maintenant triee selon l'ordre logique des lignes configu
 - machines `UNASSIGNED` a la fin.
 
 Ce tri suit l'ordre de `config.lines` et ne depend pas des suffixes CC.
+
+
+## V0.7.0 - Mode AUTO
+
+Premier controle automatique du prototype H2/O2.
+
+### Modes
+
+- `MANUAL` reste le mode de demarrage apres reboot ;
+- `AUTO` est active explicitement depuis l'Overview ;
+- en AUTO, les commandes globales, par ligne et par machine sont verrouillees ;
+- repasser en MANUAL ne modifie pas l'etat courant des machines.
+
+### Regulation des lignes
+
+La regulation utilise le buffer le plus rempli entre H2 et O2.
+
+- sous ~30 % : cible 3 lignes ;
+- zone intermediaire : cible 2 lignes ;
+- au-dessus d'environ 70 % : cible 1 ligne ;
+- a 95 % : arret complet ;
+- apres un arret buffer, reprise seulement sous 80 %.
+
+Une hysteresis de 5 points est appliquee aux changements 3/2/1 lignes pour eviter les commutations rapides autour des seuils.
+
+L'ordre de priorite suit `config.lines` : LINE 1, puis LINE 2, puis LINE 3.
+
+### Securite eau
+
+- sous 10 % d'eau : arret de toutes les lignes ;
+- reprise uniquement lorsque l'eau remonte a 40 %.
+
+### Energie
+
+La reserve electrique externe n'est volontairement pas encore utilisee par l'AUTO. Les energies internes des Separators ne sont pas considerees comme un buffer usine fiable. Le controle energie sera ajoute apres validation d'un Energy Cube ou autre buffer externe sur le reseau CC.
