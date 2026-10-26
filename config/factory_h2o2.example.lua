@@ -18,7 +18,9 @@ return {
         waterStop = 0.10,
         waterResume = 0.40,
 
-        -- Le buffer le plus rempli entre H2 et O2 pilote la production.
+        -- Les Quantum Entangloporters H2/O2 peuvent contenir du gaz hors supervision.
+        -- Les Chemical Tanks locaux restent donc la reserve de reference.
+        -- Le tank local le moins rempli pilote la demande.
         chemicalStop = 0.95,
         chemicalResume = 0.80,
 
