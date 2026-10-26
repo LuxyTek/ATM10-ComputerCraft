@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.1.0"
+local PROGRAM_VERSION = "0.2.0"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 
@@ -6,6 +6,7 @@ local defaults = {
     refreshSeconds = 1,
     textScale = 0.5,
     monitor = nil,
+    stopMode = "HIGH", -- STOP logiciel: necessite l'absence de signal redstone externe.
 }
 
 local function loadConfig()
@@ -42,6 +43,10 @@ local updateConfirmUntil = 0
 local updateMessage = nil
 local updateMessageUntil = 0
 local updateInProgress = false
+local startBounds = nil
+local stopBounds = nil
+local actionMessage = nil
+local actionMessageUntil = 0
 
 local function safeCall(device, method)
     if not device or type(device[method]) ~= "function" then return nil end
@@ -122,6 +127,45 @@ local function sumSeparatorTelemetry(list)
     return energy, maxEnergy, usage, online
 end
 
+local function getControlState(separators)
+    if #separators == 0 then return "UNKNOWN" end
+
+    local running, stopped = 0, 0
+    for _, item in ipairs(separators) do
+        local mode = safeCall(item.dev, "getRedstoneMode")
+        if mode == "DISABLED" then
+            running = running + 1
+        elseif mode == config.stopMode then
+            stopped = stopped + 1
+        end
+    end
+
+    if running == #separators then return "RUN" end
+    if stopped == #separators then return "STOP" end
+    return "MIXED"
+end
+
+local function setSeparatorMode(targetMode)
+    local p = classify()
+    if #p.separators == 0 then
+        return false, "AUCUN SEPARATOR"
+    end
+
+    local okCount = 0
+    for _, item in ipairs(p.separators) do
+        if type(item.dev.setRedstoneMode) == "function" then
+            local ok = pcall(item.dev.setRedstoneMode, targetMode)
+            if ok then okCount = okCount + 1 end
+        end
+    end
+
+    if okCount == #p.separators then
+        return true, ("%d/%d"):format(okCount, #p.separators)
+    end
+
+    return false, ("%d/%d"):format(okCount, #p.separators)
+end
+
 local function ratio(amount, capacity)
     if not capacity or capacity <= 0 then return 0 end
     return math.max(0, math.min(1, amount / capacity))
@@ -164,6 +208,20 @@ local function drawBar(y, label, amount, capacity, color)
     writeAt(barX + barW + 1, y, pctText, colors.white, colors.black)
 end
 
+local function drawControlButtons()
+    local y = math.max(19, h - 2)
+
+    local startLabel = "[ START ]"
+    local stopLabel = "[ STOP ]"
+
+    writeAt(2, y, startLabel, colors.black, colors.lime)
+    startBounds = {x1=2, x2=2+#startLabel-1, y=y}
+
+    local stopX = 2 + #startLabel + 2
+    writeAt(stopX, y, stopLabel, colors.white, colors.red)
+    stopBounds = {x1=stopX, x2=stopX+#stopLabel-1, y=y}
+end
+
 local function drawUpdateButton(now)
     local label, bg
     if updateInProgress then
@@ -185,6 +243,7 @@ local function render()
     local h2, h2Cap = sumTanks(p.hydrogenTanks)
     local o2, o2Cap = sumTanks(p.oxygenTanks)
     local energy, maxEnergy, usage, sepOnline = sumSeparatorTelemetry(p.separators)
+    local controlState = getControlState(p.separators)
 
     monitor.setBackgroundColor(colors.black)
     monitor.setTextColor(colors.white)
@@ -196,22 +255,36 @@ local function render()
     local statusOK = #p.separators > 0 and #p.hydrogenTanks > 0 and #p.oxygenTanks > 0 and #p.waterTanks > 0
     centered(4, statusOK and "SYSTEME ONLINE" or "PERIPHERIQUE MANQUANT", statusOK and colors.lime or colors.red)
 
-    drawBar(6, "WATER", water, waterCap, colors.blue)
-    drawBar(8, "HYDROGEN", h2, h2Cap, colors.lightBlue)
-    drawBar(10, "OXYGEN", o2, o2Cap, colors.cyan)
+    local controlColor = colors.orange
+    if controlState == "RUN" then controlColor = colors.lime end
+    if controlState == "STOP" then controlColor = colors.red end
+    centered(5, "PROCESS CONTROL : " .. controlState, controlColor)
 
-    writeAt(2, 12, ("Separators : %d/%d online"):format(sepOnline, #p.separators), sepOnline == #p.separators and colors.lime or colors.orange)
-    writeAt(2, 13, "Usage      : " .. compact(usage, " FE/t"), colors.white)
+    drawBar(7, "WATER", water, waterCap, colors.blue)
+    drawBar(9, "HYDROGEN", h2, h2Cap, colors.lightBlue)
+    drawBar(11, "OXYGEN", o2, o2Cap, colors.cyan)
+
+    writeAt(2, 13, ("Separators : %d/%d online"):format(sepOnline, #p.separators), sepOnline == #p.separators and colors.lime or colors.orange)
+    writeAt(2, 14, "Usage      : " .. compact(usage, " FE/t"), colors.white)
 
     if maxEnergy > 0 then
-        writeAt(2, 14, ("Sep energy : %s / %s"):format(compact(energy, " FE"), compact(maxEnergy, " FE")), colors.white)
+        writeAt(2, 15, ("Sep energy : %s / %s"):format(compact(energy, " FE"), compact(maxEnergy, " FE")), colors.white)
     end
 
-    writeAt(2, 16, ("Buffers    : W:%d H2:%d O2:%d"):format(#p.waterTanks, #p.hydrogenTanks, #p.oxygenTanks), colors.lightGray)
-    writeAt(2, 17, ("Pumps      : %d"):format(#p.pumps), colors.lightGray)
+    writeAt(2, 17, ("Buffers    : W:%d H2:%d O2:%d"):format(#p.waterTanks, #p.hydrogenTanks, #p.oxygenTanks), colors.lightGray)
+    writeAt(2, 18, ("Pumps      : %d"):format(#p.pumps), colors.lightGray)
+
+    drawControlButtons()
+
+    if actionMessage and now < actionMessageUntil then
+        writeAt(2, h - 1, actionMessage, colors.yellow, colors.black)
+    else
+        actionMessage = nil
+    end
 
     if updateMessage and now < updateMessageUntil then
-        writeAt(2, h, updateMessage, colors.red, colors.black)
+        local msgX = math.max(2, w - #updateMessage - 1)
+        writeAt(msgX, h - 1, updateMessage, colors.red, colors.black)
         updateBounds = nil
     else
         updateMessage = nil
@@ -264,10 +337,23 @@ while true do
         render()
         timer = os.startTimer(config.refreshSeconds)
 
-    elseif event == "monitor_touch" and p1 == monitorName and updateBounds then
+    elseif event == "monitor_touch" and p1 == monitorName then
         local x, y = p2, p3
-        if y == updateBounds.y and x >= updateBounds.x1 and x <= updateBounds.x2 then
-            local now = os.epoch("utc") / 1000
+        local now = os.epoch("utc") / 1000
+
+        if startBounds and y == startBounds.y and x >= startBounds.x1 and x <= startBounds.x2 then
+            local ok, detail = setSeparatorMode("DISABLED")
+            actionMessage = ok and ("START OK " .. detail) or ("START ECHEC " .. detail)
+            actionMessageUntil = now + 5
+            render()
+
+        elseif stopBounds and y == stopBounds.y and x >= stopBounds.x1 and x <= stopBounds.x2 then
+            local ok, detail = setSeparatorMode(config.stopMode)
+            actionMessage = ok and ("STOP OK " .. detail) or ("STOP ECHEC " .. detail)
+            actionMessageUntil = now + 5
+            render()
+
+        elseif updateBounds and y == updateBounds.y and x >= updateBounds.x1 and x <= updateBounds.x2 then
             if now < updateConfirmUntil then
                 updateConfirmUntil = 0
                 doUpdate()
