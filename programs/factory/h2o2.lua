@@ -131,6 +131,7 @@ local autoState = {
 local dataCache = nil
 local overflowResetPending = true
 local separatorOutputMap = {}
+local separatorDefaultMap = {}
 
 local function safeCall(device, method, ...)
     if not device or type(device[method]) ~= "function" then return nil end
@@ -299,7 +300,10 @@ local function collectData()
         local leftChemical = type(left) == "table" and left.name or nil
         local rightChemical = type(right) == "table" and right.name or nil
 
-        local mapping = separatorOutputMap[item.name] or {}
+        local mapping = separatorOutputMap[item.name] or {
+            hydrogen = separatorDefaultMap.hydrogen,
+            oxygen = separatorDefaultMap.oxygen,
+        }
 
         if leftChemical == "mekanism:hydrogen" then
             mapping.hydrogen = "LEFT"
@@ -315,6 +319,11 @@ local function collectData()
         elseif rightChemical == "mekanism:oxygen" then
             mapping.oxygen = "RIGHT"
             mapping.hydrogen = "LEFT"
+        end
+
+        if mapping.hydrogen and mapping.oxygen then
+            separatorDefaultMap.hydrogen = mapping.hydrogen
+            separatorDefaultMap.oxygen = mapping.oxygen
         end
 
         separatorOutputMap[item.name] = mapping
@@ -661,7 +670,10 @@ local function separatorChemicalSide(separatorName, device, chemicalName)
 
     local leftName = type(left) == "table" and left.name or nil
     local rightName = type(right) == "table" and right.name or nil
-    local mapping = separatorOutputMap[separatorName] or {}
+    local mapping = separatorOutputMap[separatorName] or {
+        hydrogen = separatorDefaultMap.hydrogen,
+        oxygen = separatorDefaultMap.oxygen,
+    }
 
     if leftName == "mekanism:hydrogen" then
         mapping.hydrogen = "LEFT"
@@ -677,6 +689,11 @@ local function separatorChemicalSide(separatorName, device, chemicalName)
     elseif rightName == "mekanism:oxygen" then
         mapping.oxygen = "RIGHT"
         mapping.hydrogen = "LEFT"
+    end
+
+    if mapping.hydrogen and mapping.oxygen then
+        separatorDefaultMap.hydrogen = mapping.hydrogen
+        separatorDefaultMap.oxygen = mapping.oxygen
     end
 
     separatorOutputMap[separatorName] = mapping
@@ -806,10 +823,22 @@ local function updateOverflowState(data, targetLines)
         local h2Mode = dumpH2 and "DUMPING" or "IDLE"
         local o2Mode = dumpO2 and "DUMPING" or "IDLE"
 
-        local h2OK, h2Error =
-            setSeparatorOutputDumpingMode(separator.dev, h2Side, h2Mode)
-        local o2OK, o2Error =
-            setSeparatorOutputDumpingMode(separator.dev, o2Side, o2Mode)
+        local h2OK, h2Error = true, nil
+        local o2OK, o2Error = true, nil
+
+        if h2Side then
+            h2OK, h2Error =
+                setSeparatorOutputDumpingMode(separator.dev, h2Side, h2Mode)
+        elseif lineIsActive then
+            h2OK, h2Error = false, "H2 SIDE UNKNOWN"
+        end
+
+        if o2Side then
+            o2OK, o2Error =
+                setSeparatorOutputDumpingMode(separator.dev, o2Side, o2Mode)
+        elseif lineIsActive then
+            o2OK, o2Error = false, "O2 SIDE UNKNOWN"
+        end
 
         if dumpH2 then anyH2Dump = true end
         if dumpO2 then anyO2Dump = true end
