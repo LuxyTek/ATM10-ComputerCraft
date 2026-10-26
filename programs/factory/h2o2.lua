@@ -125,6 +125,7 @@ local autoState = {
 }
 
 local dataCache = nil
+local overflowResetPending = true
 
 local function safeCall(device, method, ...)
     if not device or type(device[method]) ~= "function" then return nil end
@@ -1086,7 +1087,7 @@ drawLineBlock = function(data)
     writeAt(2, titleY, "LINES", colors.cyan)
 
     if operatingMode == "AUTO" then
-        writeAt(10, titleY, autoState.reason, colors.lightGray)
+        writeAt(10, titleY, moduleStatusReason(data), colors.lightGray)
     end
 
     if #data.lines == 0 then
@@ -1647,6 +1648,14 @@ local function dataLoop()
 
         if ok then
             dataCache = freshData
+
+            if operatingMode == "MANUAL" and overflowResetPending then
+                autoState.overflowHydrogen = false
+                autoState.overflowOxygen = false
+                updateOverflowState(dataCache, 0)
+                overflowResetPending = false
+            end
+
             os.queueEvent("factory_refresh")
             if operatingMode == "AUTO" then
                 os.queueEvent("factory_auto_tick")
