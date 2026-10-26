@@ -380,3 +380,29 @@ SEP   electrolyticSeparator_2   LINE 1   RUN   [ AUTO ]
 La pagination a ete adaptee au format deux lignes par machine.
 
 Correction associee : le fallback de mapping des sorties du Separator suit le mapping Mekanism 1.21.x, avec O2 a gauche et H2 a droite.
+
+
+## V0.7.5 - Overflow en DUMPING complet
+
+Le mode `DUMPING_EXCESS` s'est revele insuffisant en fonctionnement reel : le buffer interne du gaz sature pouvait encore se remplir assez vite pour bloquer le Separator apres environ une seconde.
+
+Correction :
+
+- lorsqu'un gaz local atteint le seuil d'overflow et que l'autre gaz doit encore etre produit, la sortie concernee passe maintenant en `DUMPING` complet ;
+- seuls les Separators appartenant aux lignes actives sont concernes ;
+- le gaz sature est donc evacue en continu depuis le buffer interne du Separator ;
+- l'autre gaz peut continuer a etre produit sans interruption ;
+- lorsque le Chemical Tank local du gaz sature redescend sous `overflowDisable` (90 %), la sortie repasse en `IDLE` afin de recommencer a remplir le buffer local ;
+- si la production s'arrete ou si le module repasse en MANUAL, les sorties gerees par l'AUTO reviennent en `IDLE`.
+
+Exemple :
+
+```text
+H2 100 % / O2 65 %
+=> H2 output = DUMPING
+=> O2 continue a etre produit
+
+H2 < 90 %
+=> H2 output = IDLE
+=> le H2 local recommence a se remplir normalement
+```
