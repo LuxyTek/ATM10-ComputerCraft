@@ -106,3 +106,17 @@ Le prototype est valide si l'operateur peut, depuis le monitor :
 - comprendre pourquoi la ligne est arretee ;
 - verifier que tous les peripheriques repondent ;
 - commander un arret et un redemarrage propres.
+
+
+## V0.2 - Controle manuel
+
+La V0.2 ajoute un pilotage manuel global des Electrolytic Separators depuis le monitor.
+
+- `[ START ]` -> `setRedstoneMode("DISABLED")`
+- `[ STOP ]` -> `setRedstoneMode("HIGH")`
+- l'etat affiche peut etre `RUN`, `STOP` ou `MIXED`
+- le nombre de Separators reste dynamique : tout nouveau Separator detecte dans la cellule est inclus dans la commande globale
+
+Important : le mode STOP utilise `HIGH` sans signal redstone externe. Un Separator recevant un signal redstone physique pourrait donc fonctionner malgre le STOP logiciel.
+
+Aucun automatisme de seuil n'est encore actif en V0.2.
