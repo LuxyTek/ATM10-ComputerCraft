@@ -229,3 +229,15 @@ Simplification de la navigation :
 - la page `MACHINES` reste la vue detaillee avec le rattachement de chaque machine a sa ligne.
 
 Le controle logique des lignes ne change pas ; seule la presentation est simplifiee.
+
+
+## V0.6.1 - Tri des machines par ligne
+
+La page `MACHINES` est maintenant triee selon l'ordre logique des lignes configurees :
+
+- LINE 1 : Pump puis Separator ;
+- LINE 2 : Pump puis Separator ;
+- LINE 3 : Pump puis Separator ;
+- machines `UNASSIGNED` a la fin.
+
+Ce tri suit l'ordre de `config.lines` et ne depend pas des suffixes CC.
