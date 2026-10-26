@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.7.0"
+local PROGRAM_VERSION = "0.7.1"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 
@@ -488,7 +488,19 @@ local function decideAutoTarget(data)
     local waterFill = ratio(data.water, data.waterCapacity)
     local h2Fill = ratio(data.hydrogen, data.hydrogenCapacity)
     local o2Fill = ratio(data.oxygen, data.oxygenCapacity)
-    local chemicalFill = math.max(h2Fill, o2Fill)
+
+    -- Les Quantum Entangloporters ne sont pas supervises.
+    -- Les tanks locaux restent donc la reserve de reference :
+    -- le moins rempli pilote la demande, et l'arret "plein"
+    -- n'arrive que lorsque les DEUX tanks locaux sont pleins.
+    local demandFill = math.min(h2Fill, o2Fill)
+    local bothFull =
+        h2Fill >= config.auto.chemicalStop
+        and o2Fill >= config.auto.chemicalStop
+
+    local bothRecovered =
+        h2Fill <= config.auto.chemicalResume
+        or o2Fill <= config.auto.chemicalResume
 
     if autoState.waterHold then
         if waterFill >= config.auto.waterResume then
@@ -505,36 +517,42 @@ local function decideAutoTarget(data)
     end
 
     if autoState.chemicalHold then
-        if chemicalFill <= config.auto.chemicalResume then
+        if bothRecovered then
             autoState.chemicalHold = false
             autoState.stage = nil
         else
             autoState.stage = 0
-            return 0, ("HOLD BUFFER %.0f%%"):format(chemicalFill * 100)
+            return 0, ("HOLD H2 %.0f O2 %.0f"):format(
+                h2Fill * 100,
+                o2Fill * 100
+            )
         end
-    elseif chemicalFill >= config.auto.chemicalStop then
+    elseif bothFull then
         autoState.chemicalHold = true
         autoState.stage = 0
-        return 0, ("HOLD BUFFER %.0f%%"):format(chemicalFill * 100)
+        return 0, ("FULL H2 %.0f O2 %.0f"):format(
+            h2Fill * 100,
+            o2Fill * 100
+        )
     end
 
     local h = config.auto.stageHysteresis
     local stage = autoState.stage
 
     if not stage or stage <= 0 then
-        stage = initialAutoStage(chemicalFill, maxLines)
+        stage = initialAutoStage(demandFill, maxLines)
     elseif stage >= 3 then
-        if chemicalFill >= config.auto.scaleToTwo + h then
+        if demandFill >= config.auto.scaleToTwo + h then
             stage = math.min(2, maxLines)
         end
     elseif stage == 2 then
-        if chemicalFill >= config.auto.scaleToOne + h then
+        if demandFill >= config.auto.scaleToOne + h then
             stage = math.min(1, maxLines)
-        elseif chemicalFill < config.auto.scaleToTwo - h then
+        elseif demandFill < config.auto.scaleToTwo - h then
             stage = maxLines
         end
     elseif stage == 1 then
-        if chemicalFill < config.auto.scaleToOne - h then
+        if demandFill < config.auto.scaleToOne - h then
             stage = math.min(2, maxLines)
         end
     end
@@ -542,7 +560,10 @@ local function decideAutoTarget(data)
     stage = math.max(0, math.min(stage, maxLines))
     autoState.stage = stage
 
-    return stage, ("BUFFER %.0f%%"):format(chemicalFill * 100)
+    return stage, ("LOCAL H2 %.0f O2 %.0f"):format(
+        h2Fill * 100,
+        o2Fill * 100
+    )
 end
 
 local function applyAutoTarget(data, targetLines)
