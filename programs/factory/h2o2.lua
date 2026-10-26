@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.7.3"
+local PROGRAM_VERSION = "0.7.4"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
@@ -281,14 +281,44 @@ local function collectData()
             kind = "PUMP",
             name = item.name,
             state = item.state,
+            fluidFill = safeCall(item.dev, "getFluidFilledPercentage"),
         })
     end
 
     for _, item in ipairs(devices.separators) do
+        local left = safeCall(item.dev, "getLeftOutput")
+        local right = safeCall(item.dev, "getRightOutput")
+        local leftFill = safeCall(item.dev, "getLeftOutputFilledPercentage")
+        local rightFill = safeCall(item.dev, "getRightOutputFilledPercentage")
+
+        local h2Fill = nil
+        local o2Fill = nil
+
+        if type(left) == "table" and left.name == "mekanism:hydrogen" then
+            h2Fill = leftFill
+        elseif type(left) == "table" and left.name == "mekanism:oxygen" then
+            o2Fill = leftFill
+        end
+
+        if type(right) == "table" and right.name == "mekanism:hydrogen" then
+            h2Fill = rightFill
+        elseif type(right) == "table" and right.name == "mekanism:oxygen" then
+            o2Fill = rightFill
+        end
+
+        -- Mapping Mekanism 1.21.x de l'Electrolytic Separator :
+        -- gauche = O2, droite = H2. Utilise seulement comme fallback
+        -- quand un buffer vide ne fournit pas de chemical identifiable.
+        if o2Fill == nil then o2Fill = leftFill end
+        if h2Fill == nil then h2Fill = rightFill end
+
         table.insert(machines, {
             kind = "SEP",
             name = item.name,
             state = item.state,
+            waterFill = safeCall(item.dev, "getInputFilledPercentage"),
+            hydrogenFill = h2Fill,
+            oxygenFill = o2Fill,
         })
     end
 
@@ -614,10 +644,10 @@ local function separatorChemicalSide(device, chemicalName)
         return "RIGHT"
     end
 
-    -- Le module est explicitement H2/O2 sur eau :
-    -- Mekanism place H2 a gauche et O2 a droite pour cette recette.
-    if chemicalName == "mekanism:hydrogen" then return "LEFT" end
-    if chemicalName == "mekanism:oxygen" then return "RIGHT" end
+    -- Le module est explicitement H2/O2 sur eau.
+    -- Mapping Mekanism 1.21.x : O2 a gauche, H2 a droite.
+    if chemicalName == "mekanism:hydrogen" then return "RIGHT" end
+    if chemicalName == "mekanism:oxygen" then return "LEFT" end
 
     return nil
 end
@@ -862,6 +892,11 @@ local function compact(value, unit)
     end
 
     return string.format("%.0f%s", value, unit or "")
+end
+
+local function machinePct(value)
+    if type(value) ~= "number" then return "N/A" end
+    return string.format("%.1f%%", math.max(0, math.min(1, value)) * 100)
 end
 
 local function writeAt(x, y, text, fg, bg)
@@ -1170,15 +1205,20 @@ local function renderMachines(data)
 
     local firstY = 7
     local footerReserve = 4
-    local rowsPerPage = math.max(1, height - firstY - footerReserve)
+    local rowsPerMachine = 2
+    local machinesPerPage = math.max(
+        1,
+        math.floor((height - firstY - footerReserve + 1) / rowsPerMachine)
+    )
+
     local total = #data.machines
-    local pageCount = math.max(1, math.ceil(total / rowsPerPage))
+    local pageCount = math.max(1, math.ceil(total / machinesPerPage))
 
     if machinePage > pageCount then machinePage = pageCount end
     if machinePage < 1 then machinePage = 1 end
 
-    local startIndex = (machinePage - 1) * rowsPerPage + 1
-    local endIndex = math.min(total, startIndex + rowsPerPage - 1)
+    local startIndex = (machinePage - 1) * machinesPerPage + 1
+    local endIndex = math.min(total, startIndex + machinesPerPage - 1)
 
     if total == 0 then
         centered(8, "AUCUNE MACHINE", colors.orange)
@@ -1244,7 +1284,23 @@ local function renderMachines(data)
                 })
             end
 
-            y = y + 1
+            if machine.kind == "PUMP" then
+                writeAt(
+                    8,
+                    y + 1,
+                    "FLUID " .. machinePct(machine.fluidFill),
+                    colors.lightGray
+                )
+            else
+                local detail = ("WATER %s   H2 %s   O2 %s"):format(
+                    machinePct(machine.waterFill),
+                    machinePct(machine.hydrogenFill),
+                    machinePct(machine.oxygenFill)
+                )
+                writeAt(8, y + 1, detail, colors.lightGray)
+            end
+
+            y = y + rowsPerMachine
         end
     end
 
