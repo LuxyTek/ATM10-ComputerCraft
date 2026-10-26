@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.7.8"
+local PROGRAM_VERSION = "0.7.9"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
@@ -230,7 +230,8 @@ local function sumTanks(list)
 end
 
 local function sumSeparatorTelemetry(list)
-    local energy, maxEnergy, usage, online = 0, 0, 0, 0
+    local energy, maxEnergy, usage = 0, 0, 0
+    local responding, running = 0, 0
 
     for _, item in ipairs(list) do
         local currentEnergy = safeCall(item.dev, "getEnergy")
@@ -241,10 +242,17 @@ local function sumSeparatorTelemetry(list)
         if type(currentEnergy) == "number" then energy = energy + currentEnergy end
         if type(currentMax) == "number" then maxEnergy = maxEnergy + currentMax end
         if type(currentUsage) == "number" then usage = usage + currentUsage end
-        if input ~= nil then online = online + 1 end
+
+        if input ~= nil then
+            responding = responding + 1
+        end
+
+        if item.state == "RUN" then
+            running = running + 1
+        end
     end
 
-    return energy, maxEnergy, usage, online
+    return energy, maxEnergy, usage, responding, running
 end
 
 local function getControlState(devices)
@@ -279,7 +287,7 @@ local function collectData()
     local hydrogen, hydrogenCapacity = sumTanks(devices.hydrogenTanks)
     local oxygen, oxygenCapacity = sumTanks(devices.oxygenTanks)
 
-    local energy, maxEnergy, usage, separatorOnline =
+    local energy, maxEnergy, usage, separatorResponding, separatorRunning =
         sumSeparatorTelemetry(devices.separators)
 
     local machines = {}
@@ -436,7 +444,8 @@ local function collectData()
         maxEnergy = maxEnergy,
         usage = usage,
 
-        separatorOnline = separatorOnline,
+        separatorResponding = separatorResponding,
+        separatorRunning = separatorRunning,
         controlState = getControlState(devices),
     }
 end
@@ -971,7 +980,7 @@ local function buildModuleStatus(data)
         or autoState.reason == "FAULT CONTROL"
         or autoState.overflowFault then
         health = "FAULT"
-    elseif hasMixed or data.separatorOnline < #devices.separators then
+    elseif hasMixed or data.separatorResponding < #devices.separators then
         health = "WARN"
     end
 
@@ -1234,6 +1243,42 @@ end
 
 local drawLineBlock
 
+local function getProcessSummary(data)
+    local running = 0
+    local stopped = 0
+    local abnormal = false
+
+    for _, line in ipairs(data.lines or {}) do
+        if line.state == "RUN" then
+            running = running + 1
+        elseif line.state == "STOP" then
+            stopped = stopped + 1
+        else
+            abnormal = true
+        end
+    end
+
+    local total = #(data.lines or {})
+
+    if abnormal then
+        return "MIXED", colors.orange
+    end
+
+    if total == 0 then
+        return "NO LINES", colors.lightGray
+    end
+
+    if running > 0 then
+        return ("RUN %d/%d LINES"):format(running, total), colors.lime
+    end
+
+    if stopped == total then
+        return "STOP", colors.red
+    end
+
+    return "IDLE", colors.lightGray
+end
+
 local function renderOverview(data)
     local devices = data.devices
 
@@ -1249,11 +1294,8 @@ local function renderOverview(data)
         statusOK and colors.lime or colors.red
     )
 
-    local controlColor = colors.orange
-    if data.controlState == "RUN" then controlColor = colors.lime end
-    if data.controlState == "STOP" then controlColor = colors.red end
-
-    centered(6, "PROCESS CONTROL : " .. data.controlState, controlColor)
+    local processText, processColor = getProcessSummary(data)
+    centered(6, "PROCESS : " .. processText, processColor)
 
     drawBar(8, "WATER", data.water, data.waterCapacity, colors.blue)
     drawBar(10, "HYDROGEN", data.hydrogen, data.hydrogenCapacity, colors.lightBlue)
@@ -1262,8 +1304,13 @@ local function renderOverview(data)
     writeAt(
         2,
         14,
-        ("Separators : %d/%d online"):format(data.separatorOnline, #devices.separators),
-        data.separatorOnline == #devices.separators and colors.lime or colors.orange
+        ("Separators : %d/%d actifs | %d/%d detectes"):format(
+            data.separatorRunning,
+            #devices.separators,
+            data.separatorResponding,
+            #devices.separators
+        ),
+        data.separatorResponding == #devices.separators and colors.lime or colors.orange
     )
 
     writeAt(2, 15, "Usage      : " .. compact(data.usage, " FE/t"), colors.white)
