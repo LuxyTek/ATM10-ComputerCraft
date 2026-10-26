@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.4.0"
+local PROGRAM_VERSION = "0.4.1"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 
@@ -64,6 +64,8 @@ local updateInProgress = false
 local actionMessage = nil
 local actionMessageUntil = 0
 local controlPending = nil
+local controlPendingSince = 0
+local CONTROL_WATCHDOG_SECONDS = 5
 
 local dataCache = nil
 
@@ -282,52 +284,25 @@ end
 local function setProcessMode(targetMode)
     local devices = dataCache and dataCache.devices or classify()
 
-    local targets = {}
+    local sepOK, pumpOK = 0, 0
 
     for _, item in ipairs(devices.separators) do
-        table.insert(targets, { kind = "SEP", item = item })
+        if type(item.dev.setRedstoneMode) == "function" then
+            local ok = pcall(item.dev.setRedstoneMode, targetMode)
+            if ok then sepOK = sepOK + 1 end
+        end
     end
 
     for _, item in ipairs(devices.pumps) do
-        table.insert(targets, { kind = "PUMP", item = item })
+        if type(item.dev.setRedstoneMode) == "function" then
+            local ok = pcall(item.dev.setRedstoneMode, targetMode)
+            if ok then pumpOK = pumpOK + 1 end
+        end
     end
 
-    if #targets == 0 then
+    local total = #devices.separators + #devices.pumps
+    if total == 0 then
         return false, "AUCUNE MACHINE"
-    end
-
-    local results = {}
-    local tasks = {}
-
-    for i = 1, #targets do
-        local index = i
-        local target = targets[i]
-
-        tasks[i] = function()
-            local method = target.item.dev.setRedstoneMode
-
-            if type(method) ~= "function" then
-                results[index] = { ok = false, kind = target.kind }
-                return
-            end
-
-            local ok = pcall(method, targetMode)
-            results[index] = { ok = ok, kind = target.kind }
-        end
-    end
-
-    parallel.waitForAll(table.unpack(tasks))
-
-    local sepOK, pumpOK = 0, 0
-
-    for _, result in ipairs(results) do
-        if result and result.ok then
-            if result.kind == "SEP" then
-                sepOK = sepOK + 1
-            elseif result.kind == "PUMP" then
-                pumpOK = pumpOK + 1
-            end
-        end
     end
 
     local allOK =
@@ -760,12 +735,28 @@ local function doUpdate()
     render()
 end
 
+local function controlIsLocked()
+    if not controlPending then return false end
+
+    local now = os.epoch("utc") / 1000
+    if now - controlPendingSince > CONTROL_WATCHDOG_SECONDS then
+        controlPending = nil
+        controlPendingSince = 0
+        actionMessage = "CONTROLE REINITIALISE"
+        actionMessageUntil = now + 4
+        return false
+    end
+
+    return true
+end
+
 local function queueGlobalControl(targetMode, label)
-    if updateInProgress or controlPending then return end
+    if updateInProgress or controlIsLocked() then return end
 
     local now = os.epoch("utc") / 1000
 
     controlPending = label
+    controlPendingSince = now
     actionMessage = label .. " EN COURS..."
     actionMessageUntil = now + 10
     render()
@@ -774,12 +765,13 @@ local function queueGlobalControl(targetMode, label)
 end
 
 local function queueMachineControl(button)
-    if updateInProgress or controlPending then return end
+    if updateInProgress or controlIsLocked() then return end
 
     local now = os.epoch("utc") / 1000
     local verb = button.targetMode == "DISABLED" and "START" or "STOP"
 
     controlPending = button.name
+    controlPendingSince = now
     actionMessage = verb .. " " .. shortName(button.name, 24) .. "..."
     actionMessageUntil = now + 10
     render()
@@ -800,6 +792,7 @@ local function uiLoop()
         local event, p1, p2, p3 = os.pullEvent()
 
         if event == "factory_refresh" then
+            controlIsLocked()
             render()
 
         elseif event == "monitor_touch" and p1 == monitorName then
@@ -860,32 +853,50 @@ local function controlLoop()
         local _, scope, targetName, targetMode, label =
             os.pullEvent("factory_control_request")
 
-        local ok, detail
-
-        if scope == "machine" then
-            ok, detail = setMachineMode(targetName, targetMode)
-        else
-            ok, detail = setProcessMode(targetMode)
-        end
-
         local now = os.epoch("utc") / 1000
 
-        actionMessage =
-            ok and (label .. " OK  " .. shortName(detail, 30))
-            or (label .. " ECHEC  " .. shortName(detail, 30))
+        local protectedOK, ok, detail = pcall(function()
+            if scope == "machine" then
+                return setMachineMode(targetName, targetMode)
+            end
+
+            return setProcessMode(targetMode)
+        end)
+
+        if not protectedOK then
+            actionMessage = label .. " ERREUR INTERNE"
+        else
+            actionMessage =
+                ok and (label .. " OK  " .. shortName(detail, 30))
+                or (label .. " ECHEC  " .. shortName(detail, 30))
+        end
 
         actionMessageUntil = now + 5
         controlPending = nil
+        controlPendingSince = 0
 
-        dataCache = collectData()
+        local refreshOK, freshData = pcall(collectData)
+        if refreshOK then
+            dataCache = freshData
+        end
+
         os.queueEvent("factory_refresh")
     end
 end
 
 local function dataLoop()
     while true do
-        dataCache = collectData()
-        os.queueEvent("factory_refresh")
+        local ok, freshData = pcall(collectData)
+
+        if ok then
+            dataCache = freshData
+            os.queueEvent("factory_refresh")
+        else
+            actionMessage = "TELEMETRIE: ERREUR TRANSITOIRE"
+            actionMessageUntil = os.epoch("utc") / 1000 + 3
+            os.queueEvent("factory_refresh")
+        end
+
         sleep(config.refreshSeconds)
     end
 end
