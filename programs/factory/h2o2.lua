@@ -121,6 +121,7 @@ local autoState = {
     overflowHydrogen = false,
     overflowOxygen = false,
     overflowFault = false,
+    overflowError = nil,
     lastTick = 0,
 }
 
@@ -657,28 +658,48 @@ local function separatorChemicalSide(device, chemicalName)
 end
 
 local function setSeparatorOutputDumpingMode(device, side, mode)
+    local setter
+    local getter
+
     if side == "LEFT" then
-        if type(device.setLeftOutputDumpingMode) ~= "function" then
-            return false
-        end
-
-        local current = safeCall(device, "getLeftOutputDumpingMode")
-        if current == mode then return true end
-
-        return pcall(device.setLeftOutputDumpingMode, mode)
-
+        setter = device.setLeftOutputDumpingMode
+        getter = device.getLeftOutputDumpingMode
     elseif side == "RIGHT" then
-        if type(device.setRightOutputDumpingMode) ~= "function" then
-            return false
-        end
-
-        local current = safeCall(device, "getRightOutputDumpingMode")
-        if current == mode then return true end
-
-        return pcall(device.setRightOutputDumpingMode, mode)
+        setter = device.setRightOutputDumpingMode
+        getter = device.getRightOutputDumpingMode
+    else
+        return false, "UNKNOWN SIDE"
     end
 
-    return false
+    if type(setter) ~= "function" or type(getter) ~= "function" then
+        return false, "DUMP API MISSING"
+    end
+
+    local current = safeCall(device, side == "LEFT"
+        and "getLeftOutputDumpingMode"
+        or "getRightOutputDumpingMode")
+
+    if current == mode then
+        return true
+    end
+
+    local ok, err = pcall(setter, mode)
+    if not ok then
+        return false, tostring(err)
+    end
+
+    local applied = safeCall(device, side == "LEFT"
+        and "getLeftOutputDumpingMode"
+        or "getRightOutputDumpingMode")
+
+    if applied ~= mode then
+        return false, ("EXPECTED %s GOT %s"):format(
+            tostring(mode),
+            tostring(applied)
+        )
+    end
+
+    return true
 end
 
 local function updateOverflowState(data, targetLines)
@@ -733,15 +754,20 @@ local function updateOverflowState(data, targetLines)
         local h2Side = separatorChemicalSide(separator.dev, "mekanism:hydrogen")
         local o2Side = separatorChemicalSide(separator.dev, "mekanism:oxygen")
 
-        local h2OK = setSeparatorOutputDumpingMode(separator.dev, h2Side, h2Mode)
-        local o2OK = setSeparatorOutputDumpingMode(separator.dev, o2Side, o2Mode)
+        local h2OK, h2Error =
+            setSeparatorOutputDumpingMode(separator.dev, h2Side, h2Mode)
+        local o2OK, o2Error =
+            setSeparatorOutputDumpingMode(separator.dev, o2Side, o2Mode)
 
         if not h2OK or not o2OK then
             allOK = false
+            autoState.overflowError =
+                (separator.name .. " " .. tostring(h2Error or o2Error))
         end
     end
 
     autoState.overflowFault = not allOK
+    if allOK then autoState.overflowError = nil end
     return allOK
 end
 
@@ -755,6 +781,9 @@ local function moduleStatusReason(data)
     end
 
     if autoState.overflowFault then
+        if autoState.overflowError then
+            return "FAULT OVERFLOW"
+        end
         return "FAULT OVERFLOW"
     end
 
@@ -1493,6 +1522,7 @@ local function toggleOperatingMode()
         autoState.overflowHydrogen = false
         autoState.overflowOxygen = false
         autoState.overflowFault = false
+        autoState.overflowError = nil
         actionMessage = "MODE MANUAL"
         actionMessageUntil = now + 4
     else
@@ -1504,6 +1534,7 @@ local function toggleOperatingMode()
         autoState.overflowHydrogen = false
         autoState.overflowOxygen = false
         autoState.overflowFault = false
+        autoState.overflowError = nil
         autoState.lastTick = 0
         actionMessage = "MODE AUTO"
         actionMessageUntil = now + 4
