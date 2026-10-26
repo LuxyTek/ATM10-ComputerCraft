@@ -216,3 +216,16 @@ Correction UI incluse : chaque ecriture revient sur un fond noir par defaut, ce 
 - elle affiche uniquement `LINE X`, l'etat de la ligne et le bouton START / STOP ;
 - la page `MACHINES` indique maintenant la ligne logique de chaque Pump et Separator ;
 - une machine non associee est affichee `UNASSIGNED`.
+
+
+## V0.6.0 - Lignes integrees a l'Overview
+
+Simplification de la navigation :
+
+- suppression de l'onglet `LINES` ;
+- seuls `OVERVIEW` et `MACHINES` restent en navigation principale ;
+- l'Overview contient maintenant un bloc compact `LINES` ;
+- chaque ligne y conserve son etat et son bouton START / STOP ;
+- la page `MACHINES` reste la vue detaillee avec le rattachement de chaque machine a sa ligne.
+
+Le controle logique des lignes ne change pas ; seule la presentation est simplifiee.
