@@ -38,7 +38,8 @@ return {
 
         -- Anti-blocage Separator : si un gaz local est quasi plein
         -- alors que l'autre doit encore etre produit, sa sortie passe
-        -- temporairement en DUMPING_EXCESS.
+        -- temporairement en DUMPING complet pour vider le buffer interne
+        -- assez vite et eviter tout blocage du Separator.
         overflowEnable = 0.98,
         overflowDisable = 0.90,
     },
