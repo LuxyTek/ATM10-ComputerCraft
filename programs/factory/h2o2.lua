@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.2.1"
+local PROGRAM_VERSION = "0.3.0"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 
@@ -55,6 +55,7 @@ local updateInProgress = false
 
 local actionMessage = nil
 local actionMessageUntil = 0
+local controlPending = nil
 
 local dataCache = nil
 
@@ -152,23 +153,29 @@ local function sumSeparatorTelemetry(list)
     return energy, maxEnergy, usage, online
 end
 
-local function getControlState(separators)
-    if #separators == 0 then return "UNKNOWN" end
+local function getControlState(devices)
+    local total = #devices.separators + #devices.pumps
+    if total == 0 then return "UNKNOWN" end
 
     local running, stopped = 0, 0
 
-    for _, item in ipairs(separators) do
-        local mode = safeCall(item.dev, "getRedstoneMode")
+    local function inspect(list)
+        for _, item in ipairs(list) do
+            local mode = safeCall(item.dev, "getRedstoneMode")
 
-        if mode == "DISABLED" then
-            running = running + 1
-        elseif mode == config.stopMode then
-            stopped = stopped + 1
+            if mode == "DISABLED" then
+                running = running + 1
+            elseif mode == config.stopMode then
+                stopped = stopped + 1
+            end
         end
     end
 
-    if running == #separators then return "RUN" end
-    if stopped == #separators then return "STOP" end
+    inspect(devices.separators)
+    inspect(devices.pumps)
+
+    if running == total then return "RUN" end
+    if stopped == total then return "STOP" end
 
     return "MIXED"
 end
@@ -200,31 +207,73 @@ local function collectData()
         usage = usage,
 
         separatorOnline = separatorOnline,
-        controlState = getControlState(devices.separators),
+        controlState = getControlState(devices),
     }
 end
 
-local function setSeparatorMode(targetMode)
-    local devices = classify()
+local function setProcessMode(targetMode)
+    local devices = dataCache and dataCache.devices or classify()
 
-    if #devices.separators == 0 then
-        return false, "AUCUN SEPARATOR"
-    end
-
-    local changed = 0
+    local targets = {}
 
     for _, item in ipairs(devices.separators) do
-        if type(item.dev.setRedstoneMode) == "function" then
-            local ok = pcall(item.dev.setRedstoneMode, targetMode)
-            if ok then changed = changed + 1 end
+        table.insert(targets, { kind = "SEP", item = item })
+    end
+
+    for _, item in ipairs(devices.pumps) do
+        table.insert(targets, { kind = "PUMP", item = item })
+    end
+
+    if #targets == 0 then
+        return false, "AUCUNE MACHINE"
+    end
+
+    local results = {}
+    local tasks = {}
+
+    for i = 1, #targets do
+        local index = i
+        local target = targets[i]
+
+        tasks[i] = function()
+            local method = target.item.dev.setRedstoneMode
+
+            if type(method) ~= "function" then
+                results[index] = { ok = false, kind = target.kind }
+                return
+            end
+
+            local ok = pcall(method, targetMode)
+            results[index] = { ok = ok, kind = target.kind }
         end
     end
 
-    if changed == #devices.separators then
-        return true, ("%d/%d"):format(changed, #devices.separators)
+    parallel.waitForAll(table.unpack(tasks))
+
+    local sepOK, pumpOK = 0, 0
+
+    for _, result in ipairs(results) do
+        if result and result.ok then
+            if result.kind == "SEP" then
+                sepOK = sepOK + 1
+            elseif result.kind == "PUMP" then
+                pumpOK = pumpOK + 1
+            end
+        end
     end
 
-    return false, ("%d/%d"):format(changed, #devices.separators)
+    local allOK =
+        sepOK == #devices.separators
+        and pumpOK == #devices.pumps
+
+    local detail = ("SEP %d/%d  PUMP %d/%d"):format(
+        sepOK,
+        #devices.separators,
+        pumpOK,
+        #devices.pumps
+    )
+
+    return allOK, detail
 end
 
 local function ratio(amount, capacity)
@@ -494,25 +543,25 @@ local function uiLoop()
             local x, y = p2, p3
             local now = os.epoch("utc") / 1000
 
-            if inside(startBounds, x, y) and not updateInProgress then
-                local ok, detail = setSeparatorMode("DISABLED")
+            if inside(startBounds, x, y)
+                and not updateInProgress
+                and not controlPending then
 
-                actionMessage =
-                    ok and ("START OK " .. detail)
-                    or ("START ECHEC " .. detail)
+                controlPending = "START"
+                actionMessage = "START EN COURS..."
+                actionMessageUntil = now + 10
+                render()
+                os.queueEvent("factory_control_request", "DISABLED", "START")
 
-                actionMessageUntil = now + 5
-                os.queueEvent("factory_force_refresh")
+            elseif inside(stopBounds, x, y)
+                and not updateInProgress
+                and not controlPending then
 
-            elseif inside(stopBounds, x, y) and not updateInProgress then
-                local ok, detail = setSeparatorMode(config.stopMode)
-
-                actionMessage =
-                    ok and ("STOP OK " .. detail)
-                    or ("STOP ECHEC " .. detail)
-
-                actionMessageUntil = now + 5
-                os.queueEvent("factory_force_refresh")
+                controlPending = "STOP"
+                actionMessage = "STOP EN COURS..."
+                actionMessageUntil = now + 10
+                render()
+                os.queueEvent("factory_control_request", config.stopMode, "STOP")
 
             elseif inside(updateBounds, x, y) and not updateInProgress then
                 if now < updateConfirmUntil then
@@ -523,10 +572,26 @@ local function uiLoop()
                 end
             end
 
-        elseif event == "factory_force_refresh" then
-            dataCache = collectData()
-            render()
         end
+    end
+end
+
+local function controlLoop()
+    while true do
+        local _, targetMode, label = os.pullEvent("factory_control_request")
+
+        local ok, detail = setProcessMode(targetMode)
+        local now = os.epoch("utc") / 1000
+
+        actionMessage =
+            ok and (label .. " OK  " .. detail)
+            or (label .. " ECHEC  " .. detail)
+
+        actionMessageUntil = now + 5
+        controlPending = nil
+
+        dataCache = collectData()
+        os.queueEvent("factory_refresh")
     end
 end
 
@@ -538,4 +603,4 @@ local function dataLoop()
     end
 end
 
-parallel.waitForAny(uiLoop, dataLoop)
+parallel.waitForAny(uiLoop, dataLoop, controlLoop)
