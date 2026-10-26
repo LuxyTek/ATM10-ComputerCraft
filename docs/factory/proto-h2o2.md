@@ -155,3 +155,18 @@ Reactivite :
 - la telemetrie est relue a la fin de l'action et l'UI affiche le resultat SEP/PUMP.
 
 L'architecture reste dynamique : ajouter ou retirer une ligne change automatiquement le nombre de machines controlees.
+
+
+## V0.4.0 - Controle individuel des machines
+
+Une page `MACHINES` complete le controle global du module.
+
+- liste dynamique de toutes les Electric Pumps et Electrolytic Separators detectes ;
+- etat individuel `RUN`, `STOP` ou autre mode Mekanism ;
+- bouton `START` / `STOP` propre a chaque machine ;
+- commandes individuelles executees dans la boucle de controle, sans bloquer l'UI ;
+- pagination automatique si le nombre de machines depasse la hauteur du monitor ;
+- `START ALL` / `STOP ALL` restent disponibles sur la page Overview.
+
+Cette version ne cree volontairement aucune association Pump <-> Separator a partir des suffixes de noms CC.
+La future notion de ligne utilisera une association logique explicite afin de rester fiable apres modification ou remplacement d'une machine.
