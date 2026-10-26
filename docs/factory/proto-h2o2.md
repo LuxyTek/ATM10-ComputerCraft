@@ -134,3 +134,24 @@ Correctifs alignes sur le dashboard V1 :
 - le fichier startup fait partie du manifeste de mise a jour.
 
 La configuration locale `/config/factory_h2o2.lua` reste preservee.
+
+
+## V0.3.0 - Controle de cellule complet
+
+START / STOP pilote maintenant toute la cellule H2/O2 :
+
+- tous les Electrolytic Separators detectes ;
+- toutes les Electric Pumps detectees ;
+- RUN correspond a Separators + Pumps en mode `DISABLED` ;
+- STOP correspond a Separators + Pumps en mode `HIGH` ;
+- MIXED indique que les machines ne partagent pas toutes le meme etat.
+
+Reactivite :
+
+- le clic START / STOP ne fait plus directement les appels peripheriques ;
+- l'UI affiche immediatement `START EN COURS...` ou `STOP EN COURS...` ;
+- une boucle de controle independante execute ensuite la commande ;
+- les commandes vers les machines sont lancees en parallele via `parallel.waitForAll` ;
+- la telemetrie est relue a la fin de l'action et l'UI affiche le resultat SEP/PUMP.
+
+L'architecture reste dynamique : ajouter ou retirer une ligne change automatiquement le nombre de machines controlees.
