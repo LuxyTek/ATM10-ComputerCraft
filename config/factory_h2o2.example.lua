@@ -36,12 +36,11 @@ return {
         scaleToOne = 0.70,
         stageHysteresis = 0.05,
 
-        -- Anti-blocage Separator : si un gaz local est quasi plein
-        -- alors que l'autre doit encore etre produit, sa sortie passe
-        -- temporairement en DUMPING complet pour vider le buffer interne
-        -- assez vite et eviter tout blocage du Separator.
-        overflowEnable = 0.98,
-        overflowDisable = 0.90,
+        -- Anti-blocage pilote par le buffer INTERNE de chaque Separator.
+        -- Demarre le dump avant saturation, puis le maintient jusqu'a
+        -- evacuation suffisante du buffer interne.
+        overflowEnable = 0.80,
+        overflowDisable = 0.20,
     },
 
 
