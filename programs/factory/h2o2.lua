@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.5.0"
+local PROGRAM_VERSION = "0.5.1"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 
@@ -259,6 +259,9 @@ local function collectData()
         local pump = machineByName[lineCfg.pump]
         local separator = machineByName[lineCfg.separator]
 
+        if pump then pump.lineId = lineCfg.id end
+        if separator then separator.lineId = lineCfg.id end
+
         local state
         if not pump or not separator then
             state = "MISSING"
@@ -272,11 +275,7 @@ local function collectData()
 
         table.insert(lines, {
             id = lineCfg.id,
-            pump = lineCfg.pump,
-            separator = lineCfg.separator,
             state = state,
-            pumpState = pump and pump.state or "MISSING",
-            separatorState = separator and separator.state or "MISSING",
         })
     end
 
@@ -633,7 +632,7 @@ local function renderLines(data)
         return
     end
 
-    local y = 7
+    local y = 8
 
     for _, line in ipairs(data.lines) do
         local stateColor = colors.orange
@@ -641,11 +640,9 @@ local function renderLines(data)
         if line.state == "STOP" then stateColor = colors.red end
         if line.state == "MISSING" then stateColor = colors.lightGray end
 
-        writeAt(2, y, line.id, colors.white)
-        writeAt(14, y, "P:" .. shortName(line.pump, 18), colors.lightBlue)
-        writeAt(36, y, "S:" .. shortName(line.separator, 24), colors.cyan)
+        writeAt(6, y, line.id, colors.white)
 
-        local stateX = math.max(62, width - 22)
+        local stateX = math.max(26, math.floor(width / 2))
         writeAt(stateX, y, line.state, stateColor)
 
         local buttonLabel
@@ -665,7 +662,7 @@ local function renderLines(data)
             buttonFg = colors.black
         end
 
-        local buttonX = math.max(stateX + 8, width - #buttonLabel - 1)
+        local buttonX = width - #buttonLabel - 4
         writeAt(buttonX, y, buttonLabel, buttonFg, buttonBg)
 
         table.insert(lineButtonBounds, {
@@ -676,13 +673,6 @@ local function renderLines(data)
             id = line.id,
             targetMode = targetMode,
         })
-
-        writeAt(
-            6,
-            y + 1,
-            ("Pump:%s  Separator:%s"):format(line.pumpState, line.separatorState),
-            colors.lightGray
-        )
 
         y = y + 3
     end
@@ -722,9 +712,13 @@ local function renderMachines(data)
             if machine.state == "STOP" then stateColor = colors.red end
 
             writeAt(2, y, machine.kind, kindColor)
-            writeAt(8, y, shortName(machine.name, math.max(12, width - 32)), colors.white)
+            writeAt(8, y, shortName(machine.name, math.max(12, width - 44)), colors.white)
 
-            local stateX = math.max(20, width - 18)
+            local lineLabel = machine.lineId or "UNASSIGNED"
+            local lineX = math.max(28, width - 32)
+            writeAt(lineX, y, lineLabel, machine.lineId and colors.yellow or colors.lightGray)
+
+            local stateX = math.max(lineX + 10, width - 18)
             writeAt(stateX, y, machine.state, stateColor)
 
             local buttonLabel
