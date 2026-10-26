@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.7.2"
+local PROGRAM_VERSION = "0.7.3"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
@@ -29,6 +29,11 @@ local defaults = {
         scaleToTwo = 0.30,
         scaleToOne = 0.70,
         stageHysteresis = 0.05,
+
+        -- Evite qu'un gaz sature les buffers internes des Separators
+        -- et bloque la production de l'autre gaz.
+        overflowEnable = 0.98,
+        overflowDisable = 0.90,
     },
 
     status = {
@@ -113,6 +118,9 @@ local autoState = {
     stage = nil,
     waterHold = false,
     chemicalHold = false,
+    overflowHydrogen = false,
+    overflowOxygen = false,
+    overflowFault = false,
     lastTick = 0,
 }
 
@@ -593,6 +601,99 @@ local function applyAutoTarget(data, targetLines)
     return allOK, changed
 end
 
+local function separatorChemicalSide(device, chemicalName)
+    local left = safeCall(device, "getLeftOutput")
+    local right = safeCall(device, "getRightOutput")
+
+    if type(left) == "table" and left.name == chemicalName then
+        return "LEFT"
+    end
+
+    if type(right) == "table" and right.name == chemicalName then
+        return "RIGHT"
+    end
+
+    -- Le module est explicitement H2/O2 sur eau :
+    -- Mekanism place H2 a gauche et O2 a droite pour cette recette.
+    if chemicalName == "mekanism:hydrogen" then return "LEFT" end
+    if chemicalName == "mekanism:oxygen" then return "RIGHT" end
+
+    return nil
+end
+
+local function setSeparatorOutputDumpingMode(device, side, mode)
+    if side == "LEFT" then
+        if type(device.setLeftOutputDumpingMode) ~= "function" then
+            return false
+        end
+
+        local current = safeCall(device, "getLeftOutputDumpingMode")
+        if current == mode then return true end
+
+        return pcall(device.setLeftOutputDumpingMode, mode)
+
+    elseif side == "RIGHT" then
+        if type(device.setRightOutputDumpingMode) ~= "function" then
+            return false
+        end
+
+        local current = safeCall(device, "getRightOutputDumpingMode")
+        if current == mode then return true end
+
+        return pcall(device.setRightOutputDumpingMode, mode)
+    end
+
+    return false
+end
+
+local function updateOverflowState(data, targetLines)
+    local h2Fill = ratio(data.hydrogen, data.hydrogenCapacity)
+    local o2Fill = ratio(data.oxygen, data.oxygenCapacity)
+    local enable = config.auto.overflowEnable
+    local disable = config.auto.overflowDisable
+
+    if targetLines <= 0 then
+        autoState.overflowHydrogen = false
+        autoState.overflowOxygen = false
+    else
+        if autoState.overflowHydrogen then
+            if h2Fill <= disable or o2Fill >= config.auto.chemicalStop then
+                autoState.overflowHydrogen = false
+            end
+        elseif h2Fill >= enable and o2Fill < config.auto.chemicalStop then
+            autoState.overflowHydrogen = true
+        end
+
+        if autoState.overflowOxygen then
+            if o2Fill <= disable or h2Fill >= config.auto.chemicalStop then
+                autoState.overflowOxygen = false
+            end
+        elseif o2Fill >= enable and h2Fill < config.auto.chemicalStop then
+            autoState.overflowOxygen = true
+        end
+    end
+
+    local h2Mode = autoState.overflowHydrogen and "DUMPING_EXCESS" or "IDLE"
+    local o2Mode = autoState.overflowOxygen and "DUMPING_EXCESS" or "IDLE"
+
+    local allOK = true
+
+    for _, separator in ipairs(data.devices.separators or {}) do
+        local h2Side = separatorChemicalSide(separator.dev, "mekanism:hydrogen")
+        local o2Side = separatorChemicalSide(separator.dev, "mekanism:oxygen")
+
+        local h2OK = setSeparatorOutputDumpingMode(separator.dev, h2Side, h2Mode)
+        local o2OK = setSeparatorOutputDumpingMode(separator.dev, o2Side, o2Mode)
+
+        if not h2OK or not o2OK then
+            allOK = false
+        end
+    end
+
+    autoState.overflowFault = not allOK
+    return allOK
+end
+
 local function moduleStatusReason(data)
     if operatingMode == "MANUAL" then
         return "MANUAL CONTROL"
@@ -602,6 +703,10 @@ local function moduleStatusReason(data)
         return "FAULT CONTROL"
     end
 
+    if autoState.overflowFault then
+        return "FAULT OVERFLOW"
+    end
+
     if autoState.waterHold then
         local fill = ratio(data.water, data.waterCapacity)
         return ("HOLD WATER %.0f%%"):format(fill * 100)
@@ -609,6 +714,14 @@ local function moduleStatusReason(data)
 
     if autoState.chemicalHold then
         return "BUFFER HOLD"
+    end
+
+    if autoState.overflowHydrogen then
+        return "H2 EXCESS -> O2"
+    end
+
+    if autoState.overflowOxygen then
+        return "O2 EXCESS -> H2"
     end
 
     local h2Fill = ratio(data.hydrogen, data.hydrogenCapacity)
@@ -651,7 +764,10 @@ local function buildModuleStatus(data)
 
     local health = "OK"
 
-    if criticalMissing or hasMissing or autoState.reason == "FAULT CONTROL" then
+    if criticalMissing
+        or hasMissing
+        or autoState.reason == "FAULT CONTROL"
+        or autoState.overflowFault then
         health = "FAULT"
     elseif hasMixed or data.separatorOnline < #devices.separators then
         health = "WARN"
@@ -661,6 +777,7 @@ local function buildModuleStatus(data)
     if hasMissing then table.insert(alarms, "LINE MISSING") end
     if hasMixed then table.insert(alarms, "LINE MIXED") end
     if autoState.reason == "FAULT CONTROL" then table.insert(alarms, "CONTROL FAILURE") end
+    if autoState.overflowFault then table.insert(alarms, "OVERFLOW CONTROL FAILURE") end
 
     local state
 
@@ -1263,10 +1380,20 @@ local function toggleOperatingMode()
 
     if operatingMode == "AUTO" then
         operatingMode = "MANUAL"
+
+        if dataCache then
+            autoState.overflowHydrogen = false
+            autoState.overflowOxygen = false
+            updateOverflowState(dataCache, 0)
+        end
+
         autoState.reason = "MANUAL"
         autoState.stage = nil
         autoState.waterHold = false
         autoState.chemicalHold = false
+        autoState.overflowHydrogen = false
+        autoState.overflowOxygen = false
+        autoState.overflowFault = false
         actionMessage = "MODE MANUAL"
         actionMessageUntil = now + 4
     else
@@ -1275,6 +1402,9 @@ local function toggleOperatingMode()
         autoState.stage = nil
         autoState.waterHold = false
         autoState.chemicalHold = false
+        autoState.overflowHydrogen = false
+        autoState.overflowOxygen = false
+        autoState.overflowFault = false
         autoState.lastTick = 0
         actionMessage = "MODE AUTO"
         actionMessageUntil = now + 4
@@ -1472,9 +1602,12 @@ local function autoLoop()
                 autoState.targetLines = targetLines
                 autoState.reason = reason
 
+                local overflowOK = updateOverflowState(dataCache, targetLines)
                 local ok, changed = applyAutoTarget(dataCache, targetLines)
 
-                if not ok then
+                if not overflowOK then
+                    autoState.reason = "FAULT OVERFLOW"
+                elseif not ok then
                     autoState.reason = "FAULT CONTROL"
                 end
 
