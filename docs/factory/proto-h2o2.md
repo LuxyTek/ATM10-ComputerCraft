@@ -406,3 +406,32 @@ H2 < 90 %
 => H2 output = IDLE
 => le H2 local recommence a se remplir normalement
 ```
+
+
+## V0.7.6 - Diagnostic du dumping Separator
+
+Le comportement reel a montre qu'un buffer H2 pouvait encore remonter a 100 % malgre l'ordre `DUMPING`.
+
+Cette version n'essaie plus de compenser en modifiant arbitrairement les seuils. Elle expose et verifie l'etat reel de chaque sortie du Separator.
+
+Dans `MACHINES`, chaque Separator affiche maintenant :
+
+```text
+LEFT  O2:IDLE    RIGHT H2:DUMP
+```
+
+Les valeurs viennent directement de :
+
+- `getLeftOutput()` / `getRightOutput()` ;
+- `getLeftOutputDumpingMode()` / `getRightOutputDumpingMode()`.
+
+Apres chaque commande de changement de dumping, le programme relit le mode applique. Si Mekanism refuse la commande ou si le mode reel ne correspond pas au mode demande, l'AUTO passe en `FAULT OVERFLOW`.
+
+Rappel confirme par le code Mekanism 1.21.x :
+
+- left tank = Oxygen ;
+- right tank = Hydrogen ;
+- `DUMPING` vide le buffer interne a chaque tick ;
+- le debit de dump est augmente avec les Speed Upgrades.
+
+Ainsi, si le buffer H2 remonte encore instantanement alors que `RIGHT H2:DUMP` est effectivement affiche, le probleme ne vient plus de la commande CC mais d'un comportement/debit reel du Separator ou de sa configuration. Si l'ecran affiche `RIGHT H2:IDLE`, le diagnostic pointera au contraire un probleme d'application de la commande.
