@@ -324,3 +324,26 @@ Exemples de raisons publiees :
 - `FAULT CONTROL`.
 
 Le contenu des Quantum Entangloporters reste volontairement inconnu : les niveaux publies correspondent aux buffers locaux supervises.
+
+
+## V0.7.3 - Anti-blocage des Separators par saturation d'un gaz
+
+Probleme observe en fonctionnement reel : H2 peut atteindre 100 % alors que O2 est encore demande. Les buffers internes H2 des Electrolytic Separators se remplissent alors et la machine cesse toute electrolyse, ce qui bloque aussi la production O2.
+
+Correction :
+
+- si H2 local atteint `overflowEnable` (98 %) alors que O2 reste sous le seuil de fin de production, la sortie H2 de chaque Separator passe en `DUMPING_EXCESS` ;
+- si O2 sature avant H2, la meme logique est appliquee symetriquement a la sortie O2 ;
+- la sortie concernee repasse en `IDLE` lorsque son buffer local redescend sous `overflowDisable` (90 %) ou lorsque l'autre gaz n'a plus besoin de production ;
+- si aucune ligne ne doit tourner, les deux sorties reviennent en `IDLE` ;
+- au demarrage du programme en MANUAL, les modes de dumping geres par l'AUTO sont remis en `IDLE`.
+
+Le programme utilise les methodes Mekanism :
+
+- `getLeftOutputDumpingMode` / `setLeftOutputDumpingMode` ;
+- `getRightOutputDumpingMode` / `setRightOutputDumpingMode` ;
+- mode `DUMPING_EXCESS`.
+
+Pour la recette eau du module H2/O2, H2 est la sortie gauche et O2 la sortie droite. Le code tente d'abord d'identifier le chemical reellement present avant d'utiliser ce mapping connu comme fallback.
+
+Le mode `DUMPING_EXCESS` ne vide pas les Chemical Tanks externes : il ne concerne que le buffer interne du Separator et permet d'eviter le blocage du process lorsqu'un des deux produits ne peut plus etre evacue.
