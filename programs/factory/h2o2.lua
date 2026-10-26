@@ -548,6 +548,8 @@ local function drawUpdateButton(now)
     }
 end
 
+local drawLineBlock
+
 local function renderOverview(data)
     local devices = data.devices
 
@@ -611,7 +613,7 @@ local function renderOverview(data)
     drawGlobalControls()
 end
 
-local function drawLineBlock(data)
+drawLineBlock = function(data)
     lineButtonBounds = {}
 
     local titleY = math.max(20, height - 8)
