@@ -7,6 +7,7 @@ local files = {
     {"programs/factory/h2o2.lua", "/programs/factory/h2o2.lua", true},
     {"programs/factory/peripheral_probe.lua", "/programs/factory/peripheral_probe.lua", true},
     {"programs/factory/lib/updater.lua", "/programs/factory/lib/updater.lua", true},
+    {"programs/factory/lib/status_bus.lua", "/programs/factory/lib/status_bus.lua", true},
     {"programs/factory/update_manifest.lua", "/programs/factory/update_manifest.lua", true},
     {"config/factory_h2o2.example.lua", "/config/factory_h2o2.lua", false},
     {"startup_factory.lua", "/startup.lua", true},
