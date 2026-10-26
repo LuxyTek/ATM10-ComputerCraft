@@ -1,5 +1,5 @@
 -- Factory Control - shared updater
--- Multi-file update engine with validation, backup and rollback.
+-- Event-driven multi-file updater with validation, backup and rollback.
 
 local M = {}
 
@@ -11,7 +11,7 @@ local DEFAULTS = {
     timeout = 12,
 }
 
-local function joinBase(owner, repo, branch)
+local function baseUrl(owner, repo, branch)
     return ("https://raw.githubusercontent.com/%s/%s/%s/"):format(owner, repo, branch)
 end
 
@@ -22,28 +22,48 @@ local function ensureParent(path)
     end
 end
 
-local function readHttp(url)
-    local response, err = http.get(url, nil, true)
-    if not response then
-        return nil, err or "HTTP request failed"
+local function requestBody(url, timeoutSeconds)
+    local queued, requestError = http.request({
+        url = url,
+        method = "GET",
+        redirect = true,
+        timeout = math.max(1, timeoutSeconds - 2),
+    })
+
+    if not queued then
+        return nil, requestError or "HTTP request refused"
     end
 
-    local body = response.readAll()
-    response.close()
+    local timeoutTimer = os.startTimer(timeoutSeconds)
 
-    if not body or #body == 0 then
-        return nil, "Empty response"
+    while true do
+        local event, p1, p2 = os.pullEvent()
+
+        if event == "http_success" and p1 == url then
+            local response = p2
+            local body = response.readAll()
+            response.close()
+
+            if not body or #body == 0 then
+                return nil, "Empty response"
+            end
+
+            return body
+
+        elseif event == "http_failure" and p1 == url then
+            return nil, p2 or "HTTP failure"
+
+        elseif event == "timer" and p1 == timeoutTimer then
+            return nil, "HTTP timeout"
+        end
     end
-
-    return body
 end
 
 local function validateLua(path, body)
-    if not path:match("%.lua$") then
-        return true
-    end
+    if not path:match("%.lua$") then return true end
 
     local chunk, err = load(body, "@" .. path)
+
     if not chunk then
         return false, err
     end
@@ -51,13 +71,15 @@ local function validateLua(path, body)
     return true
 end
 
-local function loadManifest(body)
+local function parseManifest(body)
     local chunk, err = load(body, "@factory-update-manifest")
+
     if not chunk then
         return nil, err
     end
 
     local ok, manifest = pcall(chunk)
+
     if not ok then
         return nil, manifest
     end
@@ -69,7 +91,7 @@ local function loadManifest(body)
     return manifest
 end
 
-local function cleanupStaged(staged)
+local function cleanupTemps(staged)
     for _, entry in ipairs(staged) do
         if fs.exists(entry.tempPath) then
             fs.delete(entry.tempPath)
@@ -92,12 +114,13 @@ local function rollback(staged)
                 fs.delete(entry.localPath)
             end
             fs.copy(entry.backupPath, entry.localPath)
+
         elseif entry.didNotExistBefore and fs.exists(entry.localPath) then
             fs.delete(entry.localPath)
         end
     end
 
-    cleanupStaged(staged)
+    cleanupTemps(staged)
     cleanupBackups(staged)
 end
 
@@ -108,38 +131,46 @@ function M.update(options)
     local repo = options.repo or DEFAULTS.repo
     local branch = options.branch or DEFAULTS.branch
     local manifestPath = options.manifest or DEFAULTS.manifest
+    local timeout = options.timeout or DEFAULTS.timeout
 
-    local baseUrl = joinBase(owner, repo, branch)
+    local root = baseUrl(owner, repo, branch)
 
-    local manifestBody, manifestError = readHttp(baseUrl .. manifestPath)
+    local manifestBody, manifestError =
+        requestBody(root .. manifestPath, timeout)
+
     if not manifestBody then
-        return false, "Manifest download failed: " .. tostring(manifestError)
+        return false, "Manifest: " .. tostring(manifestError)
     end
 
-    local manifest, parseError = loadManifest(manifestBody)
+    local manifest, parseError = parseManifest(manifestBody)
+
     if not manifest then
         return false, "Manifest invalid: " .. tostring(parseError)
     end
 
     local staged = {}
 
-    -- Phase 1: download and validate everything before touching live files.
+    -- Phase 1: download and validate every file before changing the installation.
     for _, file in ipairs(manifest.files) do
         if type(file.remote) ~= "string" or type(file.localPath) ~= "string" then
-            cleanupStaged(staged)
-            return false, "Malformed file entry in manifest"
+            cleanupTemps(staged)
+            return false, "Malformed manifest entry"
         end
 
-        local body, downloadError = readHttp(baseUrl .. file.remote)
+        local body, downloadError =
+            requestBody(root .. file.remote, timeout)
+
         if not body then
-            cleanupStaged(staged)
-            return false, ("Download failed for %s: %s"):format(file.remote, tostring(downloadError))
+            cleanupTemps(staged)
+            return false, ("%s: %s"):format(file.remote, tostring(downloadError))
         end
 
-        local valid, validationError = validateLua(file.remote, body)
+        local valid, validationError =
+            validateLua(file.remote, body)
+
         if not valid then
-            cleanupStaged(staged)
-            return false, ("Lua validation failed for %s: %s"):format(file.remote, tostring(validationError))
+            cleanupTemps(staged)
+            return false, ("%s invalid: %s"):format(file.remote, tostring(validationError))
         end
 
         ensureParent(file.localPath)
@@ -147,19 +178,21 @@ function M.update(options)
         local tempPath = file.localPath .. ".new"
         local backupPath = file.localPath .. ".bak"
 
-        if fs.exists(tempPath) then fs.delete(tempPath) end
+        if fs.exists(tempPath) then
+            fs.delete(tempPath)
+        end
 
         local handle = fs.open(tempPath, "w")
+
         if not handle then
-            cleanupStaged(staged)
-            return false, "Cannot write temporary file: " .. tempPath
+            cleanupTemps(staged)
+            return false, "Cannot write " .. tempPath
         end
 
         handle.write(body)
         handle.close()
 
         table.insert(staged, {
-            remote = file.remote,
             localPath = file.localPath,
             tempPath = tempPath,
             backupPath = backupPath,
@@ -167,33 +200,42 @@ function M.update(options)
         })
     end
 
-    -- Phase 2: create backups for all current files.
+    -- Phase 2: back up the complete current installation.
     for _, entry in ipairs(staged) do
         if fs.exists(entry.backupPath) then
             fs.delete(entry.backupPath)
         end
 
         if fs.exists(entry.localPath) then
-            local ok, backupError = pcall(fs.copy, entry.localPath, entry.backupPath)
+            local ok, backupError =
+                pcall(fs.copy, entry.localPath, entry.backupPath)
+
             if not ok then
                 rollback(staged)
-                return false, ("Backup failed for %s: %s"):format(entry.localPath, tostring(backupError))
+                return false, ("Backup %s: %s"):format(
+                    entry.localPath,
+                    tostring(backupError)
+                )
             end
         end
     end
 
-    -- Phase 3: replace live files.
+    -- Phase 3: replace every file.
     for _, entry in ipairs(staged) do
         local ok, replaceError = pcall(function()
             if fs.exists(entry.localPath) then
                 fs.delete(entry.localPath)
             end
+
             fs.move(entry.tempPath, entry.localPath)
         end)
 
         if not ok then
             rollback(staged)
-            return false, ("Replacement failed for %s: %s"):format(entry.localPath, tostring(replaceError))
+            return false, ("Replace %s: %s"):format(
+                entry.localPath,
+                tostring(replaceError)
+            )
         end
     end
 
