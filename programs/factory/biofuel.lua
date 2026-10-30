@@ -1,4 +1,6 @@
-local PROGRAM_VERSION = "0.1.1"
+local PROGRAM_VERSION = "0.2.0"
+local args = { ... }
+local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_biofuel.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
@@ -57,10 +59,15 @@ local function getMonitor()
     error("Aucun monitor detecte")
 end
 
-local monitor, monitorName = getMonitor()
-monitor.setTextScale(config.textScale)
+local monitor = nil
+local monitorName = nil
+local width, height = 0, 0
 
-local width, height = monitor.getSize()
+if not HEADLESS then
+    monitor, monitorName = getMonitor()
+    monitor.setTextScale(config.textScale)
+    width, height = monitor.getSize()
+end
 
 local updateBounds = nil
 local updateConfirmUntil = 0
@@ -512,4 +519,8 @@ local function dataLoop()
     end
 end
 
-parallel.waitForAny(uiLoop, dataLoop, statusLoop)
+if HEADLESS then
+    parallel.waitForAny(dataLoop, statusLoop)
+else
+    parallel.waitForAny(uiLoop, dataLoop, statusLoop)
+end
