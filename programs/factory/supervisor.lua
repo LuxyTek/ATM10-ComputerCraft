@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.6.4"
+local PROGRAM_VERSION = "0.7.0"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -280,22 +280,74 @@ local function doUpdate()
     updateMessageUntil = nowSeconds() + 6
 end
 
-local function renderMap(now, list)
-    moduleBounds = {}
-    backBounds = nil
-
-    centered(3, "FACTORY MODULE MAP", colors.cyan)
-
-    if modemCount == 0 then
-        centered(6, "AUCUN MODEM REDNET", colors.red)
-        return
+local function findModule(list, id)
+    for _, module in ipairs(list) do
+        if module.id == id then return module end
     end
+    return nil
+end
 
-    if #list == 0 then
-        centered(7, "EN ATTENTE DE MODULES...", colors.orange)
-        return
+local function renderMapCard(now, module, x, y, cardWidth)
+    local net, netColor = networkState(module, now)
+    local offline = net == "OFFLINE"
+    local mode = offline and "N/A" or tostring(module.mode or "N/A")
+    local state = offline and "N/A" or tostring(module.state or "N/A")
+    local health = offline and "N/A" or tostring(module.health or "N/A")
+    local runtime, runtimeColor = runtimeState(module, offline)
+    local label = tostring(module.label or module.id or "?")
+
+    writeAt(x, y, "[ " .. label .. " ]", colors.cyan)
+    writeAt(x, y + 1, "RUNTIME  " .. runtime, runtimeColor)
+
+    writeAt(x, y + 3, "MODE     " .. mode, offline and colors.gray or modeColor(mode))
+    writeAt(x, y + 4, "STATE    " .. state, offline and colors.gray or stateColor(state))
+    writeAt(x, y + 5, "HEALTH   " .. health, offline and colors.gray or healthColor(health))
+
+    local reason = tostring(module.reason or "")
+    if reason == "" then
+        reason = offline and ("NETWORK " .. net) or "Toucher pour ouvrir"
     end
+    writeAt(x, y + 6, reason, colors.lightGray)
 
+    moduleBounds[#moduleBounds + 1] = {
+        x1=x,
+        x2=math.min(width, x + cardWidth - 1),
+        y1=y,
+        y2=y + 6,
+        id=module.id,
+    }
+end
+
+local function flowPercent(value)
+    if type(value) ~= "number" then return "N/A" end
+    value = math.max(0, math.min(1, value))
+    return ("%.0f%%"):format(value * 100)
+end
+
+local function flowColor(module, now, fill, redAt, warnAt)
+    local net = networkState(module, now)
+    if net == "OFFLINE" or tostring(module.health or "") == "FAULT" then
+        return colors.red
+    end
+    if type(fill) ~= "number" then return colors.gray end
+    if fill <= redAt then return colors.red end
+    if fill <= warnAt then return colors.orange end
+    return colors.lime
+end
+
+local function drawFlow(x1, x2, y, label, color)
+    if x2 < x1 then return end
+    local span = x2 - x1 + 1
+    writeAt(x1, y, string.rep("-", span), color)
+
+    local text = " " .. tostring(label) .. " "
+    if #text <= span then
+        local tx = x1 + math.floor((span - #text) / 2)
+        writeAt(tx, y, text, color, colors.black)
+    end
+end
+
+local function renderGenericMap(now, list)
     local columns = width >= 48 and 2 or 1
     local gap = 2
     local cardWidth = columns == 2 and math.floor((width - 5) / 2) or width - 3
@@ -309,31 +361,133 @@ local function renderMap(now, list)
         local y = startY + row * cardHeight
         if y + 6 > height - 2 then break end
 
-        local net, netColor = networkState(module, now)
-        local offline = net == "OFFLINE"
-        local mode = offline and "N/A" or tostring(module.mode or "N/A")
-        local state = offline and "N/A" or tostring(module.state or "N/A")
-        local health = offline and "N/A" or tostring(module.health or "N/A")
-        local runtime, runtimeColor = runtimeState(module, offline)
-        local label = tostring(module.label or module.id or "?")
-
-        writeAt(x, y, "[ " .. label .. " ]", colors.cyan)
-        writeAt(x, y + 1, "RUNTIME  " .. runtime, runtimeColor)
-
-        writeAt(x, y + 3, "MODE     " .. mode, offline and colors.gray or modeColor(mode))
-        writeAt(x, y + 4, "STATE    " .. state, offline and colors.gray or stateColor(state))
-        writeAt(x, y + 5, "HEALTH   " .. health, offline and colors.gray or healthColor(health))
-
-        local reason = tostring(module.reason or "")
-        if reason == "" then reason = offline and ("NETWORK " .. net) or "Toucher pour ouvrir" end
-        writeAt(x, y + 6, reason, colors.lightGray)
-
-        moduleBounds[#moduleBounds + 1] = {
-            x1=x, x2=math.min(width, x + cardWidth - 1),
-            y1=y, y2=y + 6, id=module.id
-        }
+        renderMapCard(now, module, x, y, cardWidth)
     end
 end
+
+local function renderConnectedMap(now, list, h2o2, biofuel, ethene)
+    local cardWidth = math.min(24, math.max(20, math.floor((width - 8) / 2)))
+    local leftX = 2
+    local rightX = width - cardWidth - 1
+    local junctionX = rightX - 2
+
+    local h2Y = 5
+    local etheneY = 10
+    local bioY = 17
+
+    renderMapCard(now, h2o2, leftX, h2Y, cardWidth)
+    renderMapCard(now, biofuel, leftX, bioY, cardWidth)
+    renderMapCard(now, ethene, rightX, etheneY, cardWidth)
+
+    local h2Fill = type(h2o2.metrics) == "table" and h2o2.metrics.hydrogen or nil
+    local bioFill =
+        type(biofuel.ui) == "table" and biofuel.ui.outputFill
+        or (type(biofuel.metrics) == "table" and biofuel.metrics.biofuel or nil)
+
+    local h2Net = networkState(h2o2, now)
+    local bioNet = networkState(biofuel, now)
+
+    local h2Label =
+        h2Net == "OFFLINE"
+        and "H2 OFFLINE"
+        or ("H2 " .. flowPercent(h2Fill))
+
+    local bioLabel =
+        bioNet == "OFFLINE"
+        and "BIO OFFLINE"
+        or ("BIOFUEL " .. flowPercent(bioFill))
+
+    local h2Color = flowColor(h2o2, now, h2Fill, 0.10, 0.20)
+    local bioColor = flowColor(biofuel, now, bioFill, 0.00, 0.05)
+
+    drawFlow(leftX + cardWidth, junctionX, h2Y + 3, h2Label, h2Color)
+    drawFlow(leftX + cardWidth, junctionX, bioY + 3, bioLabel, bioColor)
+
+    for y = h2Y + 4, bioY + 2 do
+        writeAt(junctionX, y, "|", colors.gray)
+    end
+
+    writeAt(junctionX, h2Y + 3, "+", h2Color)
+    writeAt(junctionX, bioY + 3, "+", bioColor)
+
+    local etheneInputY = etheneY + 3
+    writeAt(junctionX, etheneInputY, "+>", colors.cyan)
+
+    local etheneFill =
+        type(ethene.ui) == "table" and ethene.ui.etheneFill
+        or (type(ethene.metrics) == "table" and ethene.metrics.ethene or nil)
+
+    if etheneY + 8 <= height - 2 then
+        local outputColor = flowColor(ethene, now, etheneFill, -1, -1)
+        writeAt(rightX, etheneY + 8, "ETHENE OUT  " .. flowPercent(etheneFill), outputColor)
+    end
+
+    local extras = {}
+    for _, module in ipairs(list) do
+        if module.id ~= "h2o2" and module.id ~= "biofuel" and module.id ~= "ethene" then
+            table.insert(extras, module)
+        end
+    end
+
+    if #extras > 0 then
+        local extrasY = 26
+        if extrasY <= height - 2 then
+            writeAt(2, extrasY, "OTHER MODULES", colors.cyan)
+            local y = extrasY + 1
+            for _, module in ipairs(extras) do
+                if y > height - 2 then break end
+                local net = networkState(module, now)
+                local runtime, runtimeColor = runtimeState(module, net == "OFFLINE")
+                local text = ("[ %s ] %s"):format(tostring(module.label or module.id), runtime)
+                writeAt(4, y, text, runtimeColor)
+
+                moduleBounds[#moduleBounds + 1] = {
+                    x1=4,
+                    x2=math.min(width, 4 + #text - 1),
+                    y1=y,
+                    y2=y,
+                    id=module.id,
+                }
+                y = y + 1
+            end
+        end
+    end
+end
+
+local function renderMap(now, list)
+    moduleBounds = {}
+    backBounds = nil
+
+    centered(3, "FACTORY FLOW MAP", colors.cyan)
+
+    if modemCount == 0 then
+        centered(6, "AUCUN MODEM REDNET", colors.red)
+        return
+    end
+
+    if #list == 0 then
+        centered(7, "EN ATTENTE DE MODULES...", colors.orange)
+        return
+    end
+
+    local h2o2 = findModule(list, "h2o2")
+    local biofuel = findModule(list, "biofuel")
+    local ethene = findModule(list, "ethene")
+
+    local connectedLayoutFits =
+        width >= 54
+        and height >= 25
+        and h2o2 ~= nil
+        and biofuel ~= nil
+        and ethene ~= nil
+
+    if connectedLayoutFits then
+        renderConnectedMap(now, list, h2o2, biofuel, ethene)
+    else
+        renderGenericMap(now, list)
+    end
+end
+
 
 local function renderMetricList(module, startY, maxY)
     local y = startY
