@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.4.5"
+local PROGRAM_VERSION = "0.5.0"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -826,6 +826,11 @@ local function uiLoop()
                         if inside(bounds, x, y) then
                             selectedModuleId = bounds.id
                             currentView = "detail"
+
+                            -- A sleeping module refreshes its peripheral data immediately
+                            -- when the operator opens it.
+                            os.queueEvent("factory_module_wake", bounds.id, "OPEN")
+
                             handled = true
                             break
                         end
