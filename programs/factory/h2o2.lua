@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.8.1"
+local PROGRAM_VERSION = "0.8.2"
 local args = { ... }
 local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
@@ -1905,6 +1905,7 @@ local function controlLoop()
             dataCache = freshData
         end
 
+        publishImmediateStatus()
         os.queueEvent("factory_refresh")
     end
 end
@@ -1946,6 +1947,14 @@ local function autoLoop()
                 os.queueEvent("factory_refresh")
             end
         end
+    end
+end
+
+local function publishImmediateStatus()
+    local statusBus = loadStatusBus()
+    if statusBus and dataCache then
+        local packet = buildModuleStatus(dataCache)
+        pcall(statusBus.broadcastStatus, packet)
     end
 end
 
@@ -1998,6 +2007,9 @@ local function supervisorModeLoop()
     while true do
         os.pullEvent("factory_h2o2_mode_toggle")
         toggleOperatingMode()
+        local refreshOK, freshData = pcall(collectData)
+        if refreshOK then dataCache = freshData end
+        publishImmediateStatus()
         os.queueEvent("factory_refresh")
     end
 end
