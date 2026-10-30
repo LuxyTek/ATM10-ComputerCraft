@@ -554,7 +554,11 @@ local function renderBiofuel(now, module)
 
     writeAt(3,7,"INPUT BUFFER",colors.yellow)
     writeAt(5,8,tostring(ui.inputItem or "EMPTY"):gsub("^.-:",""):gsub("_"," "):upper(),colors.white)
-    writeAt(5,9,"COUNT : "..tostring(ui.inputCount or 0),colors.lightGray)
+    writeAt(5,9,("COUNT : %s / %s  (%s)"):format(
+        tostring(ui.inputCount or 0),
+        tostring(ui.inputCapacity or "?"),
+        type(ui.inputFill)=="number" and string.format("%.1f%%",ui.inputFill*100) or "N/A"
+    ),colors.lightGray)
 
     writeAt(3,12,"CRUSHING FACTORY",colors.cyan)
     local crusherState=tostring(ui.crusherState or "UNKNOWN")
@@ -570,7 +574,11 @@ local function renderBiofuel(now, module)
 
     writeAt(3,18,"BIOFUEL BUFFER",colors.green)
     writeAt(5,19,"BIO FUEL",colors.white)
-    writeAt(5,20,"COUNT : "..tostring(ui.outputCount or 0),colors.lightGray)
+    writeAt(5,20,("COUNT : %s / %s  (%s)"):format(
+        tostring(ui.outputCount or 0),
+        tostring(ui.outputCapacity or "?"),
+        type(ui.outputFill)=="number" and string.format("%.1f%%",ui.outputFill*100) or "N/A"
+    ),colors.lightGray)
 
     if ui.autoConfigured then
         writeAt(5,21,("TARGET: %s | RESUME: %s"):format(
