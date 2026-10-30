@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.2.1"
+local PROGRAM_VERSION = "0.3.0"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 
 local defaults = {
@@ -7,6 +7,8 @@ local defaults = {
     biofuelBarrel = "sophisticatedstorage:barrel_1",
     biofuelCapacity = 270336,
     etheneTank = "ultimateMaxChemicalTank_2",
+    condensentrator = "rotaryCondensentrator_0",
+    liquidEtheneTank = "ultimateFluidTank_7",
 
     lines = {
         {
@@ -27,6 +29,9 @@ local defaults = {
         etheneStop = 0.95,
         etheneResume = 0.80,
         scaleToTwo = 0.30,
+
+        liquidStop = 0.95,
+        liquidResume = 0.80,
 
         waterStop = 0.10,
         waterResume = 0.40,
@@ -86,6 +91,7 @@ local autoState = {
     hold = false,
     sleepHold = false,
     hydrogenHold = false,
+    liquidHold = nil,
     waterHold = {},
     targetLines = 0,
     reason = "AUTO INIT",
@@ -182,6 +188,54 @@ local function readWaterTank(name)
         capacity=tonumber(capacity) or 0,
         fill=ratio(amount or 0, tonumber(capacity) or 0),
         fluid=type(stored) == "table" and stored.name or nil,
+    }
+end
+
+local function readFluidTank(name)
+    if not peripheral.isPresent(name) then
+        return { present=false, amount=0, capacity=0, fill=nil }
+    end
+
+    local dev = peripheral.wrap(name)
+    local stored = safeCall(dev, "getStored")
+    local capacity = safeCall(dev, "getCapacity")
+    local amount = type(stored) == "table" and tonumber(stored.amount) or 0
+
+    return {
+        present=true,
+        name=type(stored) == "table" and stored.name or nil,
+        amount=amount or 0,
+        capacity=tonumber(capacity) or 0,
+        fill=ratio(amount or 0, tonumber(capacity) or 0),
+    }
+end
+
+local function firstCall(device, methods)
+    for _, method in ipairs(methods) do
+        local value = safeCall(device, method)
+        if value ~= nil then return value end
+    end
+    return nil
+end
+
+local function readCondensentrator(name)
+    if not peripheral.isPresent(name) then
+        return { present=false, state="ABSENT" }
+    end
+
+    local dev = peripheral.wrap(name)
+    local state = stateFromMode(safeCall(dev, "getRedstoneMode"))
+
+    return {
+        present=true,
+        state=state,
+        input=firstCall(dev, {"getInput", "getInputGas"}),
+        output=firstCall(dev, {"getOutput", "getOutputFluid"}),
+        inputFill=firstCall(dev, {"getInputFilledPercentage", "getInputGasFilledPercentage"}),
+        outputFill=firstCall(dev, {"getOutputFilledPercentage", "getOutputFluidFilledPercentage"}),
+        energy=safeCall(dev, "getEnergy"),
+        maxEnergy=safeCall(dev, "getMaxEnergy"),
+        energyUsage=safeCall(dev, "getEnergyUsage"),
     }
 end
 
@@ -283,8 +337,14 @@ local function collectData()
     local biofuel = summarizeInventory(config.biofuelBarrel)
     local ethene = readChemicalTank(config.etheneTank)
     local hydrogen = findHydrogen()
+    local condensentrator = readCondensentrator(config.condensentrator)
+    local liquidEthene = readFluidTank(config.liquidEtheneTank)
 
-    if not biofuel.present or not ethene.present or not hydrogen.present then
+    if not biofuel.present
+        or not ethene.present
+        or not hydrogen.present
+        or not condensentrator.present
+        or not liquidEthene.present then
         criticalPresent = false
     end
 
@@ -293,6 +353,8 @@ local function collectData()
         biofuel=biofuel,
         ethene=ethene,
         hydrogen=hydrogen,
+        condensentrator=condensentrator,
+        liquidEthene=liquidEthene,
         online=criticalPresent,
     }
 end
@@ -310,12 +372,18 @@ local function setLineMode(lineCfg, targetMode)
     return pumpOK and prcOK
 end
 
-local function setAllMode(targetMode)
+local function setProductionMode(targetMode)
     local ok = true
     for _, lineCfg in ipairs(config.lines) do
         if not setLineMode(lineCfg, targetMode) then ok = false end
     end
     return ok
+end
+
+local function setAllMode(targetMode)
+    local productionOK = setProductionMode(targetMode)
+    local conversionOK = setDeviceMode(config.condensentrator, targetMode)
+    return productionOK and conversionOK
 end
 
 local function updateWaterHolds(data)
@@ -357,31 +425,58 @@ local function applyAuto(data)
         return
     end
 
+    -- Conversion ETHENE GAS -> LIQUID ETHENE is regulated independently
+    -- from the PRC production. This lets the condensentrator drain the gas
+    -- buffer while the PRCs are temporarily held at 95%.
+    local liquidFill = data.liquidEthene.fill or 0
+
+    if autoState.liquidHold == nil then
+        autoState.liquidHold =
+            data.condensentrator.state == "STOP"
+            and liquidFill > config.auto.liquidResume
+    end
+
+    if autoState.liquidHold then
+        if liquidFill <= config.auto.liquidResume then
+            autoState.liquidHold = false
+        end
+    elseif liquidFill >= config.auto.liquidStop then
+        autoState.liquidHold = true
+    end
+
+    if autoState.liquidHold then
+        setDeviceMode(config.condensentrator, config.stopMode)
+    else
+        setDeviceMode(config.condensentrator, "DISABLED")
+    end
+
     local etheneFill = data.ethene.fill or 0
 
     if autoState.hold then
         if etheneFill <= config.auto.etheneResume then
             autoState.hold = false
         else
-            autoState.sleepHold = true
+            -- Only enter deep sleep when both the PRC production and
+            -- the liquid conversion are intentionally stopped.
+            autoState.sleepHold = autoState.liquidHold == true
             autoState.targetLines = 0
             autoState.reason = ("BUFFER HOLD %.0f%%"):format(etheneFill * 100)
-            setAllMode(config.stopMode)
+            setProductionMode(config.stopMode)
             return
         end
     elseif etheneFill >= config.auto.etheneStop then
         autoState.hold = true
-        autoState.sleepHold = true
+        autoState.sleepHold = autoState.liquidHold == true
         autoState.targetLines = 0
         autoState.reason = ("BUFFER FULL %.0f%%"):format(etheneFill * 100)
-        setAllMode(config.stopMode)
+        setProductionMode(config.stopMode)
         return
     end
 
     if (tonumber(data.biofuel.count) or 0) <= 0 then
         autoState.targetLines = 0
         autoState.reason = "HOLD BIOFUEL"
-        setAllMode(config.stopMode)
+        setProductionMode(config.stopMode)
         return
     end
 
@@ -392,14 +487,14 @@ local function applyAuto(data)
         else
             autoState.targetLines = 0
             autoState.reason = ("HOLD H2 %.0f%%"):format(h2Fill * 100)
-            setAllMode(config.stopMode)
+            setProductionMode(config.stopMode)
             return
         end
     elseif h2Fill <= config.auto.hydrogenStop then
         autoState.hydrogenHold = true
         autoState.targetLines = 0
         autoState.reason = ("HOLD H2 %.0f%%"):format(h2Fill * 100)
-        setAllMode(config.stopMode)
+        setProductionMode(config.stopMode)
         return
     end
 
@@ -407,7 +502,7 @@ local function applyAuto(data)
     if substrateMax >= config.auto.substrateStop then
         autoState.targetLines = 0
         autoState.reason = "HOLD SUBSTRATE OUTPUT"
-        setAllMode(config.stopMode)
+        setProductionMode(config.stopMode)
         return
     end
 
@@ -437,6 +532,8 @@ local function applyAuto(data)
         autoState.reason = "HOLD WATER"
     elseif substrateMax >= config.auto.substrateWarn then
         autoState.reason = ("PRODUCTION %d/2 | SUBSTRATE HIGH"):format(running)
+    elseif autoState.liquidHold then
+        autoState.reason = ("PRODUCTION %d/2 | LIQUID HOLD"):format(running)
     else
         autoState.reason = ("PRODUCTION %d/2"):format(running)
     end
@@ -444,16 +541,21 @@ end
 
 local function moduleState(data)
     if not data or not data.online then return "STOP" end
+
+    if data.condensentrator and data.condensentrator.state == "RUN" then
+        return "RUN"
+    end
+
+    for _, line in ipairs(data.lines) do
+        if line.state == "RUN" then return "RUN" end
+    end
+
     if operatingMode == "AUTO" and (
         autoState.hold
         or autoState.reason:find("HOLD", 1, true)
         or autoState.reason:find("FAULT", 1, true)
     ) then
         return "HOLD"
-    end
-
-    for _, line in ipairs(data.lines) do
-        if line.state == "RUN" then return "RUN" end
     end
 
     return "STOP"
@@ -529,6 +631,20 @@ local function buildModuleStatus(data)
         })
     end
 
+    table.insert(machines, {
+        kind="CONDENS",
+        name=config.condensentrator,
+        lineId="CONVERSION",
+        state=data.condensentrator.state,
+        inputFill=data.condensentrator.inputFill,
+        outputFill=data.condensentrator.outputFill,
+        liquidFill=data.liquidEthene.fill,
+        liquidName=data.liquidEthene.name,
+        energy=data.condensentrator.energy,
+        maxEnergy=data.condensentrator.maxEnergy,
+        energyUsage=data.condensentrator.energyUsage,
+    })
+
     return {
         contract=1,
         id=config.status.id,
@@ -541,8 +657,9 @@ local function buildModuleStatus(data)
         health=health,
         runtimeState=
             health == "FAULT" and "FAULT"
+            or (state == "RUN" and "ACTIVE")
             or (operatingMode == "AUTO" and autoState.sleepHold and "SLEEP")
-            or (state == "RUN" and "ACTIVE" or "IDLE"),
+            or "IDLE",
 
         runtime={
             activeSeconds=config.runtime.activeSeconds,
@@ -557,6 +674,7 @@ local function buildModuleStatus(data)
 
         metrics={
             ethene=data.ethene.fill,
+            liquidEthene=data.liquidEthene.fill,
             hydrogen=data.hydrogen.fill,
             biofuel=ratio(data.biofuel.count, config.biofuelCapacity),
         },
@@ -565,6 +683,13 @@ local function buildModuleStatus(data)
             etheneFill=data.ethene.fill,
             etheneAmount=data.ethene.amount,
             etheneCapacity=data.ethene.capacity,
+
+            liquidEtheneFill=data.liquidEthene.fill,
+            liquidEtheneAmount=data.liquidEthene.amount,
+            liquidEtheneCapacity=data.liquidEthene.capacity,
+            liquidEtheneName=data.liquidEthene.name,
+            conversionState=data.condensentrator.state,
+            conversionHold=autoState.liquidHold == true,
 
             hydrogenFill=data.hydrogen.fill,
             hydrogenAmount=data.hydrogen.amount,
@@ -583,7 +708,8 @@ local function buildModuleStatus(data)
         },
 
         details={
-            {label="ETHENE", value=type(data.ethene.fill)=="number" and ("%.1f%%"):format(data.ethene.fill*100) or "N/A"},
+            {label="ETHENE GAS", value=type(data.ethene.fill)=="number" and ("%.1f%%"):format(data.ethene.fill*100) or "N/A"},
+            {label="LIQ ETHENE", value=type(data.liquidEthene.fill)=="number" and ("%.1f%%"):format(data.liquidEthene.fill*100) or "N/A"},
             {label="H2", value=type(data.hydrogen.fill)=="number" and ("%.1f%%"):format(data.hydrogen.fill*100) or "N/A"},
             {label="BIOFUEL", value=tostring(data.biofuel.count or 0)},
             {label="SUBSTRATE", value=tostring(substrateTotal)},
@@ -622,8 +748,8 @@ end
 
 local function computeRuntimeState(data)
     if not data or not data.online then return "FAULT" end
-    if operatingMode == "AUTO" and autoState.sleepHold then return "SLEEP" end
     if moduleState(data) == "RUN" then return "ACTIVE" end
+    if operatingMode == "AUTO" and autoState.sleepHold then return "SLEEP" end
     return "IDLE"
 end
 
@@ -679,6 +805,11 @@ local function controlLoop()
             operatingMode = operatingMode == "AUTO" and "MANUAL" or "AUTO"
             autoState.hold = false
             autoState.sleepHold = false
+            if operatingMode == "AUTO" then
+                autoState.liquidHold = nil
+            else
+                autoState.liquidHold = false
+            end
             autoState.reason = operatingMode == "AUTO" and "AUTO INIT" or "MANUAL"
 
         elseif operatingMode == "MANUAL" and action == "all" then
