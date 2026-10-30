@@ -3,7 +3,6 @@ return {
 
     biofuelBarrel = "sophisticatedstorage:barrel_1",
     biofuelCapacity = 270336,
-    wasteBarrel = "sophisticatedstorage:barrel_2",
     etheneTank = "ultimateMaxChemicalTank_2",
 
     lines = {
