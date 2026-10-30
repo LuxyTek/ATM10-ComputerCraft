@@ -1,10 +1,22 @@
 return {
-    version = "0.1.1",
+    version = "0.2.0",
 
     files = {
         {
             remote = "programs/factory/supervisor.lua",
             localPath = "/programs/factory/supervisor.lua",
+        },
+        {
+            remote = "programs/factory/h2o2.lua",
+            localPath = "/programs/factory/h2o2.lua",
+        },
+        {
+            remote = "programs/factory/biofuel.lua",
+            localPath = "/programs/factory/biofuel.lua",
+        },
+        {
+            remote = "programs/factory/lib/status_bus.lua",
+            localPath = "/programs/factory/lib/status_bus.lua",
         },
         {
             remote = "programs/factory/lib/updater.lua",
