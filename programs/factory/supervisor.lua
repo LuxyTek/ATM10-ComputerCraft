@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.6.2"
+local PROGRAM_VERSION = "0.6.3"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -98,10 +98,17 @@ local biofuelModeBounds = nil
 local biofuelStartBounds = nil
 local biofuelStopBounds = nil
 
+local ethenePage = "overview"
+local etheneMachinePage = 1
+local etheneTabOverviewBounds = nil
+local etheneTabMachinesBounds = nil
 local etheneModeBounds = nil
 local etheneStartBounds = nil
 local etheneStopBounds = nil
+local ethenePrevBounds = nil
+local etheneNextBounds = nil
 local etheneLineBounds = {}
+local etheneMachineBounds = {}
 
 local updateConfirmUntil = 0
 local updateInProgress = false
@@ -402,6 +409,16 @@ local function renderH2O2(now, module)
     h2o2NextBounds = nil
     h2o2LineBounds = {}
     h2o2MachineBounds = {}
+
+    etheneTabOverviewBounds = nil
+    etheneTabMachinesBounds = nil
+    etheneModeBounds = nil
+    etheneStartBounds = nil
+    etheneStopBounds = nil
+    ethenePrevBounds = nil
+    etheneNextBounds = nil
+    etheneLineBounds = {}
+    etheneMachineBounds = {}
     biofuelModeBounds = nil
     biofuelStartBounds = nil
     biofuelStopBounds = nil
@@ -662,10 +679,15 @@ local function sendBiofuelControl(action,targetMode)
 end
 
 local function renderEthene(now, module)
+    etheneTabOverviewBounds = nil
+    etheneTabMachinesBounds = nil
     etheneModeBounds = nil
     etheneStartBounds = nil
     etheneStopBounds = nil
+    ethenePrevBounds = nil
+    etheneNextBounds = nil
     etheneLineBounds = {}
+    etheneMachineBounds = {}
 
     local backLabel = "[ < MODULES ]"
     writeAt(2,2,backLabel,colors.white,colors.gray)
@@ -673,46 +695,153 @@ local function renderEthene(now, module)
 
     centered(1,"FACTORY ETHENE  v"..tostring(module.version or "?"),colors.cyan)
 
-    centered(4,module.health=="FAULT" and "SYSTEME INCOMPLET" or "SYSTEME ONLINE",
-        module.health=="FAULT" and colors.red or healthColor(module.health))
-    centered(5,"PROCESS : "..tostring(module.state or "?"),stateColor(module.state))
-
-    local runtime, runtimeColor = runtimeState(module, false)
-    writeAt(3,6,"RUNTIME : "..runtime,runtimeColor)
-    local runtimeDetail = runtimeDetailText(module)
-    if runtimeDetail then writeAt(math.max(24,width-24),6,runtimeDetail,colors.gray) end
+    local overviewLabel="[ OVERVIEW ]"
+    local machinesLabel="[ MACHINES ]"
+    writeAt(18,3,overviewLabel,colors.white,ethenePage=="overview" and colors.blue or colors.gray)
+    etheneTabOverviewBounds={x1=18,x2=18+#overviewLabel-1,y1=3,y2=3}
+    local tx=18+#overviewLabel+2
+    writeAt(tx,3,machinesLabel,colors.white,ethenePage=="machines" and colors.blue or colors.gray)
+    etheneTabMachinesBounds={x1=tx,x2=tx+#machinesLabel-1,y1=3,y2=3}
 
     local ui=type(module.ui)=="table" and module.ui or {}
+    local mode=tostring(module.mode or "AUTO")
 
-    drawH2O2Bar(8,"ETHENE",ui.etheneFill,colors.green)
-    drawH2O2Bar(10,"HYDROGEN",ui.hydrogenFill,colors.lightBlue)
+    if ethenePage=="machines" then
+        centered(5,"CONTROLE MACHINES",colors.cyan)
 
-    writeAt(3,12,("BIOFUEL   : %s / %s  (%s)"):format(
+        local machines=type(ui.machines)=="table" and ui.machines or {}
+        local firstY=7
+        local rowsPerMachine=4
+        local machinesPerPage=math.max(1,math.floor((height-firstY-4+1)/rowsPerMachine))
+        local pageCount=math.max(1,math.ceil(#machines/machinesPerPage))
+        if etheneMachinePage>pageCount then etheneMachinePage=pageCount end
+
+        local startIndex=(etheneMachinePage-1)*machinesPerPage+1
+        local endIndex=math.min(#machines,startIndex+machinesPerPage-1)
+        local y=firstY
+
+        if #machines==0 then centered(8,"AUCUNE MACHINE",colors.orange) end
+
+        for i=startIndex,endIndex do
+            local machine=machines[i]
+            local kind=tostring(machine.kind or "?")
+            local kindColor=kind=="PUMP" and colors.lightBlue or colors.cyan
+            local state=tostring(machine.state or "?")
+
+            writeAt(2,y,kind,kindColor)
+            writeAt(8,y,shortName(machine.name,math.max(12,width-42)),colors.white)
+            writeAt(math.max(30,width-26),y,tostring(machine.lineId or "UNASSIGNED"),colors.yellow)
+            writeAt(math.max(42,width-14),y,state,stateColor(state))
+
+            if mode=="AUTO" then
+                writeAt(math.max(50,width-8),y,"[ AUTO ]",colors.lightGray,colors.gray)
+            else
+                local running=state=="RUN"
+                local label=running and "[ STOP ]" or "[ START ]"
+                local bx=width-#label-1
+                writeAt(bx,y,label,running and colors.white or colors.black,
+                    running and colors.red or colors.lime)
+                etheneMachineBounds[#etheneMachineBounds+1]={
+                    x1=bx,x2=bx+#label-1,y1=y,y2=y,
+                    name=machine.name,targetMode=running and "HIGH" or "DISABLED"
+                }
+            end
+
+            if kind=="PUMP" then
+                local fluid=machinePct(machine.fluidFill)
+                local water=machinePct(machine.waterFill)
+                writeAt(8,y+1,("WATER %s   PUMP FLUID %s"):format(water,fluid),colors.lightGray)
+
+                local energyText="ENERGY N/A"
+                if type(machine.energy)=="number" and type(machine.maxEnergy)=="number" then
+                    energyText=("ENERGY %s / %s"):format(
+                        compact(machine.energy," FE"),
+                        compact(machine.maxEnergy," FE")
+                    )
+                end
+                writeAt(8,y+2,energyText,colors.gray)
+                writeAt(8,y+3,"USAGE "..compact(machine.energyUsage," FE/t"),colors.gray)
+            else
+                writeAt(8,y+1,("WATER %s   H2 %s   ETHENE %s"):format(
+                    machinePct(machine.waterFill),
+                    machinePct(machine.hydrogenFill),
+                    machinePct(machine.etheneFill)
+                ),colors.lightGray)
+
+                local inputLabel=tostring(machine.inputItemName or "EMPTY")
+                    :gsub("^.-:",""):gsub("_"," "):upper()
+                writeAt(8,y+2,("BIOFUEL %s x%s   SUB %s"):format(
+                    inputLabel,
+                    tostring(machine.inputItemCount or 0),
+                    tostring(machine.substrateCount or 0)
+                ),colors.gray)
+
+                local energyText="ENERGY N/A"
+                if type(machine.energy)=="number" and type(machine.maxEnergy)=="number" then
+                    energyText=("ENERGY %s / %s | %s"):format(
+                        compact(machine.energy," FE"),
+                        compact(machine.maxEnergy," FE"),
+                        compact(machine.energyUsage," FE/t")
+                    )
+                end
+                writeAt(8,y+3,energyText,colors.gray)
+            end
+
+            y=y+rowsPerMachine
+        end
+
+        local navY=height-2
+        if etheneMachinePage>1 then
+            writeAt(2,navY,"[ < ]",colors.white,colors.gray)
+            ethenePrevBounds={x1=2,x2=6,y1=navY,y2=navY}
+        end
+        centered(navY,("PAGE %d/%d"):format(etheneMachinePage,pageCount),colors.lightGray)
+        if etheneMachinePage<pageCount then
+            local label="[ > ]"
+            local bx=width-#label-1
+            writeAt(bx,navY,label,colors.white,colors.gray)
+            etheneNextBounds={x1=bx,x2=bx+#label-1,y1=navY,y2=navY}
+        end
+        return
+    end
+
+    centered(5,module.health=="FAULT" and "SYSTEME INCOMPLET" or "SYSTEME ONLINE",
+        module.health=="FAULT" and colors.red or healthColor(module.health))
+    centered(6,"PROCESS : "..tostring(module.state or "?"),stateColor(module.state))
+
+    local runtime,runtimeColor=runtimeState(module,false)
+    writeAt(3,7,"RUNTIME : "..runtime,runtimeColor)
+    local runtimeDetail=runtimeDetailText(module)
+    if runtimeDetail then writeAt(math.max(24,width-24),7,runtimeDetail,colors.gray) end
+
+    drawH2O2Bar(9,"ETHENE",ui.etheneFill,colors.green)
+    drawH2O2Bar(11,"HYDROGEN",ui.hydrogenFill,colors.lightBlue)
+
+    writeAt(3,13,("BIOFUEL   : %s / %s  (%s)"):format(
         tostring(ui.biofuelCount or 0),
         tostring(ui.biofuelCapacity or "?"),
         type(ui.biofuelFill)=="number" and string.format("%.1f%%",ui.biofuelFill*100) or "N/A"
     ),colors.yellow)
 
     local substrateTotal=tonumber(ui.substrateTotal) or 0
-    local substrateColor=substrateTotal >= 96 and colors.orange or colors.lightGray
-    writeAt(3,13,"SUBSTRATE : "..tostring(substrateTotal).." | OUTPUT QE",substrateColor)
-    writeAt(3,14,"WASTE BUF : "..(ui.wastePresent == false and "N/A" or tostring(ui.wasteCount or 0)),colors.lightGray)
+    local substrateColor=substrateTotal>=96 and colors.orange or colors.lightGray
+    writeAt(3,14,"SUBSTRATE : "..tostring(substrateTotal).." | OUTPUT QE",substrateColor)
+    writeAt(3,15,"WASTE BUF : "..(ui.wastePresent==false and "N/A" or tostring(ui.wasteCount or 0)),colors.lightGray)
 
     local lines=type(ui.lines)=="table" and ui.lines or {}
-    local mode=tostring(module.mode or "AUTO")
 
-    writeAt(3,16,"LINES",colors.cyan)
-    local y=17
+    writeAt(3,17,"LINES",colors.cyan)
+    local y=18
     for _,line in ipairs(lines) do
         writeAt(4,y,tostring(line.id),colors.white)
         local lineDisplayState=tostring(line.state)
-        if (tonumber(line.substrateCount) or 0) >= 64 then lineDisplayState="HOLD" end
+        if (tonumber(line.substrateCount) or 0)>=64 then lineDisplayState="HOLD" end
         writeAt(14,y,lineDisplayState,stateColor(lineDisplayState))
         writeAt(24,y,("WATER %s"):format(
             type(line.waterFill)=="number" and string.format("%.0f%%",line.waterFill*100) or "N/A"
         ),colors.blue)
         writeAt(38,y,"SUB "..tostring(line.substrateCount or 0),
-            (line.substrateCount or 0) >= 48 and colors.orange or colors.lightGray)
+            (line.substrateCount or 0)>=48 and colors.orange or colors.lightGray)
 
         if mode=="MANUAL" then
             local running=line.state=="RUN"
@@ -725,11 +854,10 @@ local function renderEthene(now, module)
                 id=line.id,targetMode=running and "HIGH" or "DISABLED"
             }
         end
-
         y=y+2
     end
 
-    local modeY=math.max(23,height-6)
+    local modeY=math.max(24,height-6)
     writeAt(3,modeY,"MODE :",colors.lightGray)
     writeAt(10,modeY,mode,modeColor(mode))
     if mode=="AUTO" then
@@ -968,6 +1096,7 @@ local function uiLoop()
                 currentView = "map"
                 selectedModuleId = nil
                 h2o2Page = "overview"
+                ethenePage = "overview"
 
             else
                 local handled = false
@@ -1039,7 +1168,19 @@ local function uiLoop()
                     end
 
                 elseif currentView == "detail" and selectedModuleId == "ethene" then
-                    if inside(etheneModeBounds,x,y) then
+                    if inside(etheneTabOverviewBounds,x,y) then
+                        ethenePage="overview"
+                        handled=true
+                    elseif inside(etheneTabMachinesBounds,x,y) then
+                        ethenePage="machines"
+                        handled=true
+                    elseif inside(ethenePrevBounds,x,y) then
+                        etheneMachinePage=math.max(1,etheneMachinePage-1)
+                        handled=true
+                    elseif inside(etheneNextBounds,x,y) then
+                        etheneMachinePage=etheneMachinePage+1
+                        handled=true
+                    elseif inside(etheneModeBounds,x,y) then
                         sendEtheneControl("toggle_mode")
                         handled=true
                     elseif inside(etheneStartBounds,x,y) then
@@ -1054,6 +1195,16 @@ local function uiLoop()
                                 sendEtheneControl("line",button.id,button.targetMode)
                                 handled=true
                                 break
+                            end
+                        end
+
+                        if not handled then
+                            for _,button in ipairs(etheneMachineBounds) do
+                                if inside(button,x,y) then
+                                    sendEtheneControl("machine",button.name,button.targetMode)
+                                    handled=true
+                                    break
+                                end
                             end
                         end
                     end
