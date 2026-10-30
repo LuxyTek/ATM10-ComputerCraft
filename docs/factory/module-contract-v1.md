@@ -103,3 +103,19 @@ Le Dashboard V0.2.0 utilise :
 - sinon les `metrics` du contrat comme contenu detaille.
 
 Ces champs restent purement informatifs. Le contrat v1 ne transporte toujours aucune commande distante.
+
+
+## Dashboard V0.3.0 - vue MODULES
+
+La V0.3.0 conserve la vue Dashboard V0.2.0 et ajoute un affichage dedie `MODULES`.
+
+Cette vue sert de cartographie operationnelle des cellules Factory :
+
+- chaque module publie via `factory.status.v1` et apparait automatiquement ;
+- les modules sont presentes sous forme de cartes avec NETWORK, MODE, STATE, HEALTH et raison courante ;
+- toucher une carte ouvre la page detaillee du module ;
+- la page detaillee continue d'exploiter `details`, puis `metrics` en repli ;
+- la navigation precedent/suivant permet de parcourir les modules sans revenir au Dashboard ;
+- le Dashboard central reste en lecture seule dans le contrat v1.
+
+Le pilotage distant n'est volontairement pas ajoute a cette version. Les commandes restent locales a chaque controleur de module afin de valider d'abord l'ergonomie, la supervision et le mapping avant d'introduire un futur protocole de commandes et d'acquittements.
