@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.2.0"
+local PROGRAM_VERSION = "0.3.0"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_dashboard.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -78,6 +78,7 @@ local selectedModuleId = nil
 
 local updateBounds = nil
 local overviewBounds = nil
+local modulesBounds = nil
 local prevBounds = nil
 local nextBounds = nil
 local moduleRowBounds = {}
@@ -205,10 +206,15 @@ local function drawUpdateButton(now)
     updateBounds = { x1 = x, x2 = x + #label - 1, y1 = height, y2 = height }
 end
 
-local function drawOverviewButton()
-    local label = "[ OVERVIEW ]"
-    writeAt(2, 2, label, colors.white, currentView == "overview" and colors.blue or colors.gray)
-    overviewBounds = { x1 = 2, x2 = 2 + #label - 1, y1 = 2, y2 = 2 }
+local function drawTopNavigation()
+    local dashboardLabel = "[ DASHBOARD ]"
+    writeAt(2, 2, dashboardLabel, colors.white, currentView == "overview" and colors.blue or colors.gray)
+    overviewBounds = { x1 = 2, x2 = 2 + #dashboardLabel - 1, y1 = 2, y2 = 2 }
+
+    local modulesLabel = "[ MODULES ]"
+    local x = 2 + #dashboardLabel + 2
+    writeAt(x, 2, modulesLabel, colors.white, currentView == "modules" and colors.blue or colors.gray)
+    modulesBounds = { x1 = x, x2 = x + #modulesLabel - 1, y1 = 2, y2 = 2 }
 end
 
 local function drawModuleNavigation(list)
@@ -220,19 +226,19 @@ local function drawModuleNavigation(list)
 
     if index > 1 then
         local label = "[ < ]"
-        writeAt(16, 2, label, colors.white, colors.gray)
-        prevBounds = { x1 = 16, x2 = 16 + #label - 1, y1 = 2, y2 = 2 }
+        writeAt(2, 3, label, colors.white, colors.gray)
+        prevBounds = { x1 = 2, x2 = 2 + #label - 1, y1 = 3, y2 = 3 }
     end
 
     local module = list[index]
     local label = "[ " .. tostring(module.label or module.id) .. " ]"
-    centered(2, label, colors.cyan)
+    centered(3, label, colors.cyan)
 
     if index < #list then
         local nextLabel = "[ > ]"
-        local x = math.max(22, width - #nextLabel - 12)
-        writeAt(x, 2, nextLabel, colors.white, colors.gray)
-        nextBounds = { x1 = x, x2 = x + #nextLabel - 1, y1 = 2, y2 = 2 }
+        local x = math.max(8, width - #nextLabel - 1)
+        writeAt(x, 3, nextLabel, colors.white, colors.gray)
+        nextBounds = { x1 = x, x2 = x + #nextLabel - 1, y1 = 3, y2 = 3 }
     end
 end
 
@@ -354,6 +360,74 @@ local function renderOverview(now, list)
         }
 
         y = y + 3
+    end
+end
+
+local function renderModulesMap(now, list)
+    moduleRowBounds = {}
+
+    centered(4, "MODULES - FACTORY MAP", colors.cyan)
+
+    if modemCount == 0 then
+        centered(7, "AUCUN MODEM REDNET", colors.red)
+        return
+    end
+
+    if #list == 0 then
+        centered(7, "EN ATTENTE DE MODULES...", colors.orange)
+        return
+    end
+
+    local columns = width >= 48 and 2 or 1
+    local gap = 2
+    local cardWidth
+
+    if columns == 2 then
+        cardWidth = math.floor((width - 5) / 2)
+    else
+        cardWidth = width - 3
+    end
+
+    local cardHeight = 6
+    local startY = 6
+
+    for index, module in ipairs(list) do
+        local col = (index - 1) % columns
+        local row = math.floor((index - 1) / columns)
+        local x = 2 + col * (cardWidth + gap)
+        local y = startY + row * cardHeight
+
+        if y + 4 > height - 3 then break end
+
+        local net, netColor = networkState(module, now)
+        local isOffline = net == "OFFLINE"
+        local label = tostring(module.label or module.id or "?")
+        local mode = isOffline and "N/A" or tostring(module.mode or "N/A")
+        local state = isOffline and "N/A" or tostring(module.state or "N/A")
+        local health = isOffline and "N/A" or tostring(module.health or "N/A")
+
+        writeAt(x, y, "[ " .. label .. " ]", colors.cyan)
+        writeAt(x, y + 1, "NET " .. net, netColor)
+        writeAt(x, y + 2, mode .. " | " .. state, isOffline and colors.gray or stateColor(state))
+        writeAt(x, y + 3, "HEALTH " .. health, isOffline and colors.gray or healthColor(health))
+
+        local summary = tostring(module.reason or "")
+        if summary == "" then
+            if isOffline then
+                summary = ("Last %.0fs"):format(statusAge(module, now))
+            else
+                summary = "Toucher pour ouvrir"
+            end
+        end
+        writeAt(x, y + 4, summary, colors.lightGray)
+
+        moduleRowBounds[#moduleRowBounds + 1] = {
+            x1 = x,
+            x2 = math.min(width, x + cardWidth - 1),
+            y1 = y,
+            y2 = y + 4,
+            id = module.id,
+        }
     end
 end
 
@@ -491,15 +565,18 @@ render = function()
     centered(1, "FACTORY DASHBOARD  v" .. PROGRAM_VERSION, colors.cyan)
 
     overviewBounds = nil
+    modulesBounds = nil
     prevBounds = nil
     nextBounds = nil
     moduleRowBounds = {}
 
-    drawOverviewButton()
+    drawTopNavigation()
 
     if currentView == "module" then
         drawModuleNavigation(list)
         renderDetail(now, list)
+    elseif currentView == "modules" then
+        renderModulesMap(now, list)
     else
         renderOverview(now, list)
     end
@@ -557,6 +634,10 @@ local function uiLoop()
                 currentView = "overview"
                 selectedModuleId = nil
 
+            elseif inside(modulesBounds, x, y) then
+                currentView = "modules"
+                selectedModuleId = nil
+
             elseif inside(prevBounds, x, y) then
                 local index = selectedIndex(list)
                 if index and index > 1 then
@@ -572,7 +653,7 @@ local function uiLoop()
             else
                 local handled = false
 
-                if currentView == "overview" then
+                if currentView == "overview" or currentView == "modules" then
                     for _, bounds in ipairs(moduleRowBounds) do
                         if inside(bounds, x, y) then
                             selectedModuleId = bounds.id
