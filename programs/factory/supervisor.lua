@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.7.2"
+local PROGRAM_VERSION = "0.8.0"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -413,13 +413,13 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene)
     local etheneInputY = etheneY + 3
     writeAt(junctionX, etheneInputY, "+>", colors.cyan)
 
-    local etheneFill =
-        type(ethene.ui) == "table" and ethene.ui.etheneFill
-        or (type(ethene.metrics) == "table" and ethene.metrics.ethene or nil)
+    local liquidEtheneFill =
+        type(ethene.ui) == "table" and ethene.ui.liquidEtheneFill
+        or (type(ethene.metrics) == "table" and ethene.metrics.liquidEthene or nil)
 
     if etheneY + 8 <= height - 2 then
-        local outputColor = flowColor(ethene, now, etheneFill, -1, -1)
-        writeAt(rightX, etheneY + 8, "ETHENE OUT  " .. flowPercent(etheneFill), outputColor)
+        local outputColor = flowColor(ethene, now, liquidEtheneFill, -1, -1)
+        writeAt(rightX, etheneY + 8, "LIQ ETHENE  " .. flowPercent(liquidEtheneFill), outputColor)
     end
 
     local extras = {}
@@ -798,7 +798,7 @@ local function renderBiofuel(now, module)
         writeAt(5,22,"TARGET: A RENSEIGNER",colors.orange)
     end
 
-    local modeY=math.max(24,height-6)
+    local modeY=math.max(25,height-6)
     writeAt(3,modeY,"MODE :",colors.lightGray)
     writeAt(10,modeY,mode,modeColor(mode))
     local modeLabel=mode=="AUTO" and "[ MANUAL ]" or "[ AUTO ]"
@@ -915,6 +915,23 @@ local function renderEthene(now, module)
                 end
                 writeAt(8,y+2,energyText,colors.gray)
                 writeAt(8,y+3,"USAGE "..compact(machine.energyUsage," FE/t"),colors.gray)
+
+            elseif kind=="CONDENS" then
+                writeAt(8,y+1,("ETHENE GAS %s   LIQUID %s"):format(
+                    machinePct(machine.inputFill),
+                    machinePct(machine.liquidFill)
+                ),colors.lightGray)
+
+                local energyText="ENERGY N/A"
+                if type(machine.energy)=="number" and type(machine.maxEnergy)=="number" then
+                    energyText=("ENERGY %s / %s"):format(
+                        compact(machine.energy," FE"),
+                        compact(machine.maxEnergy," FE")
+                    )
+                end
+                writeAt(8,y+2,energyText,colors.gray)
+                writeAt(8,y+3,"USAGE "..compact(machine.energyUsage," FE/t"),colors.gray)
+
             else
                 writeAt(8,y+1,("WATER %s   H2 %s   ETHENE %s"):format(
                     machinePct(machine.waterFill),
@@ -968,10 +985,11 @@ local function renderEthene(now, module)
     local runtimeDetail=runtimeDetailText(module)
     if runtimeDetail then writeAt(math.max(24,width-24),7,runtimeDetail,colors.gray) end
 
-    drawH2O2Bar(9,"ETHENE",ui.etheneFill,colors.green)
-    drawH2O2Bar(11,"HYDROGEN",ui.hydrogenFill,colors.lightBlue)
+    drawH2O2Bar(9,"ETHENE GAS",ui.etheneFill,colors.green)
+    drawH2O2Bar(11,"LIQ ETHENE",ui.liquidEtheneFill,colors.lime)
+    drawH2O2Bar(13,"HYDROGEN",ui.hydrogenFill,colors.lightBlue)
 
-    writeAt(3,13,("BIOFUEL   : %s / %s  (%s)"):format(
+    writeAt(3,15,("BIOFUEL   : %s / %s  (%s)"):format(
         tostring(ui.biofuelCount or 0),
         tostring(ui.biofuelCapacity or "?"),
         type(ui.biofuelFill)=="number" and string.format("%.1f%%",ui.biofuelFill*100) or "N/A"
@@ -979,12 +997,16 @@ local function renderEthene(now, module)
 
     local substrateTotal=tonumber(ui.substrateTotal) or 0
     local substrateColor=substrateTotal>=96 and colors.orange or colors.lightGray
-    writeAt(3,14,"SUBSTRATE : "..tostring(substrateTotal).." | OUTPUT QE",substrateColor)
+    writeAt(3,16,"SUBSTRATE : "..tostring(substrateTotal).." | OUTPUT QE",substrateColor)
+
+    local conversionState=tostring(ui.conversionState or "N/A")
+    if ui.conversionHold then conversionState="HOLD" end
+    writeAt(3,17,"CONVERSION: "..conversionState,stateColor(conversionState))
 
     local lines=type(ui.lines)=="table" and ui.lines or {}
 
-    writeAt(3,16,"LINES",colors.cyan)
-    local y=17
+    writeAt(3,19,"LINES",colors.cyan)
+    local y=20
     for _,line in ipairs(lines) do
         writeAt(4,y,tostring(line.id),colors.white)
         local lineDisplayState=tostring(line.state)
