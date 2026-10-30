@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.3.3"
+local PROGRAM_VERSION = "0.4.0"
 local args = { ... }
 local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_biofuel.lua"
@@ -17,6 +17,12 @@ local defaults = {
     inputCapacity = 270336,
     outputCapacity = 270336,
     stopMode = "HIGH",
+
+    runtime = {
+        activeSeconds = 1,
+        idleSeconds = 15,
+        sleepSeconds = 600,
+    },
 
     auto = {
         -- L'AUTO reste disponible mais ne peut pas determiner "plein"
@@ -86,6 +92,11 @@ local updateMessage = nil
 local updateMessageUntil = 0
 local updateInProgress = false
 local dataCache = nil
+local runtimeState = {
+    state = "ACTIVE",
+    wakeReason = "BOOT",
+    lastPoll = 0,
+}
 
 local operatingMode = "AUTO"
 local autoState = {
@@ -356,7 +367,7 @@ local function buildModuleStatus(data)
         health = health,
         runtimeState =
             health == "FAULT" and "FAULT"
-            or (operatingMode == "AUTO" and autoState.hold and "IDLE")
+            or (operatingMode == "AUTO" and autoState.hold and "SLEEP")
             or (state == "RUN" and "ACTIVE" or "IDLE"),
         reason = operatingMode == "AUTO"
             and autoState.reason
@@ -624,6 +635,36 @@ local function statusLoop()
     end
 end
 
+local function computeRuntimeState(data)
+    if not data or not data.online then return "FAULT" end
+    if operatingMode == "AUTO" and autoState.hold then return "SLEEP" end
+    if data.crusherState == "RUN" then return "ACTIVE" end
+    return "IDLE"
+end
+
+local function waitForNextPoll(seconds)
+    local timer = os.startTimer(math.max(0.1, seconds))
+
+    while true do
+        local event, p1, p2 = os.pullEvent()
+
+        if event == "timer" and p1 == timer then
+            return "TIMER"
+        elseif event == "factory_module_wake" and p1 == "biofuel" then
+            runtimeState.wakeReason = tostring(p2 or "WAKE")
+            return runtimeState.wakeReason
+        end
+    end
+end
+
+local function pollInterval()
+    local state = computeRuntimeState(dataCache)
+    runtimeState.state = state
+    if state == "SLEEP" then return config.runtime.sleepSeconds end
+    if state == "IDLE" then return config.runtime.idleSeconds end
+    return config.runtime.activeSeconds
+end
+
 local function dataLoop()
     while true do
         local ok, fresh = pcall(collectData)
@@ -636,7 +677,12 @@ local function dataLoop()
         end
 
         os.queueEvent("factory_biofuel_refresh")
-        sleep(config.refreshSeconds)
+        if operatingMode == "AUTO" then
+            os.queueEvent("factory_biofuel_auto_tick")
+        end
+
+        runtimeState.lastPoll = os.epoch("utc") / 1000
+        waitForNextPoll(pollInterval())
     end
 end
 
@@ -667,7 +713,7 @@ end
 
 local function autoLoop()
     while true do
-        sleep(config.auto.checkSeconds)
+        os.pullEvent("factory_biofuel_auto_tick")
 
         if operatingMode == "AUTO" and dataCache then
             local ok = pcall(applyAuto, dataCache)
@@ -677,6 +723,7 @@ local function autoLoop()
             else
                 autoState.reason = "AUTO FAULT"
             end
+
             publishImmediateStatus()
             os.queueEvent("factory_biofuel_refresh")
         end
