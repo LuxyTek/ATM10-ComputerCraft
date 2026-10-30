@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.6.3"
+local PROGRAM_VERSION = "0.6.4"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -826,12 +826,11 @@ local function renderEthene(now, module)
     local substrateTotal=tonumber(ui.substrateTotal) or 0
     local substrateColor=substrateTotal>=96 and colors.orange or colors.lightGray
     writeAt(3,14,"SUBSTRATE : "..tostring(substrateTotal).." | OUTPUT QE",substrateColor)
-    writeAt(3,15,"WASTE BUF : "..(ui.wastePresent==false and "N/A" or tostring(ui.wasteCount or 0)),colors.lightGray)
 
     local lines=type(ui.lines)=="table" and ui.lines or {}
 
-    writeAt(3,17,"LINES",colors.cyan)
-    local y=18
+    writeAt(3,16,"LINES",colors.cyan)
+    local y=17
     for _,line in ipairs(lines) do
         writeAt(4,y,tostring(line.id),colors.white)
         local lineDisplayState=tostring(line.state)
