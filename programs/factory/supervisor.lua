@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.5.3"
+local PROGRAM_VERSION = "0.6.0"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -7,6 +7,7 @@ local UPDATE_MANIFEST = "programs/factory/supervisor_update_manifest.lua"
 local MODULE_PROGRAMS = {
     { id = "h2o2", path = "/programs/factory/h2o2.lua" },
     { id = "biofuel", path = "/programs/factory/biofuel.lua" },
+    { id = "ethene", path = "/programs/factory/ethene.lua" },
 }
 
 local defaults = {
@@ -96,6 +97,11 @@ local h2o2MachineBounds = {}
 local biofuelModeBounds = nil
 local biofuelStartBounds = nil
 local biofuelStopBounds = nil
+
+local etheneModeBounds = nil
+local etheneStartBounds = nil
+local etheneStopBounds = nil
+local etheneLineBounds = {}
 
 local updateConfirmUntil = 0
 local updateInProgress = false
@@ -399,6 +405,10 @@ local function renderH2O2(now, module)
     biofuelModeBounds = nil
     biofuelStartBounds = nil
     biofuelStopBounds = nil
+    etheneModeBounds = nil
+    etheneStartBounds = nil
+    etheneStopBounds = nil
+    etheneLineBounds = {}
 
     local backLabel = "[ < MODULES ]"
     writeAt(2, 2, backLabel, colors.white, colors.gray)
@@ -651,6 +661,117 @@ local function sendBiofuelControl(action,targetMode)
     os.queueEvent("factory_biofuel_control",action,targetMode)
 end
 
+local function renderEthene(now, module)
+    etheneModeBounds = nil
+    etheneStartBounds = nil
+    etheneStopBounds = nil
+    etheneLineBounds = {}
+
+    local backLabel = "[ < MODULES ]"
+    writeAt(2,2,backLabel,colors.white,colors.gray)
+    backBounds={x1=2,x2=2+#backLabel-1,y1=2,y2=2}
+
+    centered(1,"FACTORY ETHENE  v"..tostring(module.version or "?"),colors.cyan)
+
+    centered(4,module.health=="FAULT" and "SYSTEME INCOMPLET" or "SYSTEME ONLINE",
+        module.health=="FAULT" and colors.red or healthColor(module.health))
+    centered(5,"PROCESS : "..tostring(module.state or "?"),stateColor(module.state))
+
+    local runtime, runtimeColor = runtimeState(module, false)
+    writeAt(3,6,"RUNTIME : "..runtime,runtimeColor)
+    local runtimeDetail = runtimeDetailText(module)
+    if runtimeDetail then writeAt(math.max(24,width-24),6,runtimeDetail,colors.gray) end
+
+    local ui=type(module.ui)=="table" and module.ui or {}
+
+    drawH2O2Bar(8,"ETHENE",ui.etheneFill,colors.green)
+    drawH2O2Bar(10,"HYDROGEN",ui.hydrogenFill,colors.lightBlue)
+
+    writeAt(3,12,("BIOFUEL   : %s / %s  (%s)"):format(
+        tostring(ui.biofuelCount or 0),
+        tostring(ui.biofuelCapacity or "?"),
+        type(ui.biofuelFill)=="number" and string.format("%.1f%%",ui.biofuelFill*100) or "N/A"
+    ),colors.yellow)
+
+    local extractText="UNKNOWN"
+    local extractColor=colors.orange
+    if ui.extractionSupport == true then
+        extractText="CC AUTO"
+        extractColor=colors.lime
+    elseif ui.extractionSupport == false then
+        extractText="MANUAL"
+        extractColor=colors.orange
+    end
+
+    writeAt(3,13,"SUBSTRATE : "..tostring(ui.substrateTotal or 0).." | EXTRACTION "..extractText,extractColor)
+    writeAt(3,14,"WASTE BUF : "..tostring(ui.wasteCount or 0),colors.lightGray)
+
+    local lines=type(ui.lines)=="table" and ui.lines or {}
+    local mode=tostring(module.mode or "AUTO")
+
+    writeAt(3,16,"LINES",colors.cyan)
+    local y=17
+    for _,line in ipairs(lines) do
+        writeAt(4,y,tostring(line.id),colors.white)
+        writeAt(14,y,tostring(line.state),stateColor(line.state))
+        writeAt(24,y,("WATER %s"):format(
+            type(line.waterFill)=="number" and string.format("%.0f%%",line.waterFill*100) or "N/A"
+        ),colors.blue)
+        writeAt(38,y,"SUB "..tostring(line.substrateCount or 0),
+            (line.substrateCount or 0) >= 48 and colors.orange or colors.lightGray)
+
+        if mode=="MANUAL" then
+            local running=line.state=="RUN"
+            local label=running and "[ STOP ]" or "[ START ]"
+            local bx=width-#label-1
+            writeAt(bx,y,label,running and colors.white or colors.black,
+                running and colors.red or colors.lime)
+            etheneLineBounds[#etheneLineBounds+1]={
+                x1=bx,x2=bx+#label-1,y1=y,y2=y,
+                id=line.id,targetMode=running and "HIGH" or "DISABLED"
+            }
+        end
+
+        y=y+2
+    end
+
+    local modeY=math.max(23,height-6)
+    writeAt(3,modeY,"MODE :",colors.lightGray)
+    writeAt(10,modeY,mode,modeColor(mode))
+    if mode=="AUTO" then
+        writeAt(18,modeY,("TARGET %s/%s"):format(
+            tostring(ui.targetLines or 0),tostring(module.totalLines or 0)),colors.white)
+    end
+
+    local modeLabel=mode=="AUTO" and "[ MANUAL ]" or "[ AUTO ]"
+    local mx=width-#modeLabel-1
+    writeAt(mx,modeY,modeLabel,colors.white,mode=="AUTO" and colors.blue or colors.lime)
+    etheneModeBounds={x1=mx,x2=mx+#modeLabel-1,y1=modeY,y2=modeY}
+
+    writeAt(3,modeY+2,"STATUS :",colors.gray)
+    writeAt(12,modeY+2,tostring(module.reason or "-"),
+        module.health=="FAULT" and colors.red
+        or tostring(module.reason or ""):find("HOLD",1,true) and colors.orange
+        or colors.lightGray)
+
+    local controlY=height-2
+    if mode=="AUTO" then
+        writeAt(3,controlY,"AUTO ACTIF - CONTROLES MANUELS VERROUILLES",colors.lightGray)
+    else
+        local startLabel="[ START ALL ]"
+        local stopLabel="[ STOP ALL ]"
+        writeAt(3,controlY,startLabel,colors.black,colors.lime)
+        etheneStartBounds={x1=3,x2=3+#startLabel-1,y1=controlY,y2=controlY}
+        local sx=3+#startLabel+2
+        writeAt(sx,controlY,stopLabel,colors.white,colors.red)
+        etheneStopBounds={x1=sx,x2=sx+#stopLabel-1,y1=controlY,y2=controlY}
+    end
+end
+
+local function sendEtheneControl(action,target,targetMode)
+    os.queueEvent("factory_ethene_control",action,target or "",targetMode)
+end
+
 local function renderDetail(now)
     moduleBounds = {}
 
@@ -753,6 +874,8 @@ render = function()
         renderH2O2(now, modules.h2o2)
     elseif currentView == "detail" and selectedModuleId == "biofuel" and modules.biofuel then
         renderBiofuel(now, modules.biofuel)
+    elseif currentView == "detail" and selectedModuleId == "ethene" and modules.ethene then
+        renderEthene(now, modules.ethene)
     elseif currentView == "detail" then
         renderDetail(now)
     else
@@ -828,6 +951,10 @@ end
 
 local function moduleBiofuelLoop()
     runModuleProcess(MODULE_PROGRAMS[2])
+end
+
+local function moduleEtheneLoop()
+    runModuleProcess(MODULE_PROGRAMS[3])
 end
 
 local function uiLoop()
@@ -916,6 +1043,26 @@ local function uiLoop()
                         sendBiofuelControl("crusher","HIGH")
                         handled=true
                     end
+
+                elseif currentView == "detail" and selectedModuleId == "ethene" then
+                    if inside(etheneModeBounds,x,y) then
+                        sendEtheneControl("toggle_mode")
+                        handled=true
+                    elseif inside(etheneStartBounds,x,y) then
+                        sendEtheneControl("all","","DISABLED")
+                        handled=true
+                    elseif inside(etheneStopBounds,x,y) then
+                        sendEtheneControl("all","","HIGH")
+                        handled=true
+                    else
+                        for _,button in ipairs(etheneLineBounds) do
+                            if inside(button,x,y) then
+                                sendEtheneControl("line",button.id,button.targetMode)
+                                handled=true
+                                break
+                            end
+                        end
+                    end
                 end
 
                 if not handled and inside(updateBounds, x, y) and not updateInProgress then
@@ -939,4 +1086,4 @@ local function refreshLoop()
     end
 end
 
-parallel.waitForAny(statusLoop, uiLoop, refreshLoop, moduleH2O2Loop, moduleBiofuelLoop)
+parallel.waitForAny(statusLoop, uiLoop, refreshLoop, moduleH2O2Loop, moduleBiofuelLoop, moduleEtheneLoop)
