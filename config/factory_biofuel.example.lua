@@ -11,11 +11,17 @@ return {
     outputCapacity = 270336,
     stopMode = "HIGH",
 
+    runtime = {
+        activeSeconds = 1,
+        idleSeconds = 15,
+        sleepSeconds = 600,
+    },
+
     auto = {
         -- A renseigner avec la capacite/stock cible reel du barrel.
-        targetItems = nil,
+        targetItems = 270336,
         -- nil = 80 % de targetItems.
-        resumeItems = nil,
+        resumeItems = 216269,
         checkSeconds = 2,
     },
 
