@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.3.0"
+local PROGRAM_VERSION = "0.3.1"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_dashboard.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -73,15 +73,8 @@ local width, height = physicalMonitor.getSize()
 local monitor = window.create(physicalMonitor, 1, 1, width, height, false)
 
 local modules = {}
-local currentView = "overview"
-local selectedModuleId = nil
 
 local updateBounds = nil
-local overviewBounds = nil
-local modulesBounds = nil
-local prevBounds = nil
-local nextBounds = nil
-local moduleRowBounds = {}
 
 local updateConfirmUntil = 0
 local updateInProgress = false
@@ -110,11 +103,6 @@ local function centered(y, value, fg, bg)
     local text = tostring(value)
     local x = math.max(1, math.floor((width - #text) / 2) + 1)
     writeAt(x, y, text, fg, bg or colors.black)
-end
-
-local function pct(value)
-    if type(value) ~= "number" then return "N/A" end
-    return string.format("%.0f%%", math.max(0, math.min(1, value)) * 100)
 end
 
 local function statusAge(module, now)
@@ -164,24 +152,6 @@ local function sortedModules()
     return result
 end
 
-local function selectedIndex(list)
-    for index, module in ipairs(list) do
-        if module.id == selectedModuleId then
-            return index
-        end
-    end
-
-    return nil
-end
-
-local function inside(bounds, x, y)
-    return bounds
-        and x >= bounds.x1
-        and x <= bounds.x2
-        and y >= bounds.y1
-        and y <= bounds.y2
-end
-
 local render
 
 local function drawUpdateButton(now)
@@ -204,42 +174,6 @@ local function drawUpdateButton(now)
     local x = math.max(2, width - #label - 1)
     writeAt(x, height, label, fg, bg)
     updateBounds = { x1 = x, x2 = x + #label - 1, y1 = height, y2 = height }
-end
-
-local function drawTopNavigation()
-    local dashboardLabel = "[ DASHBOARD ]"
-    writeAt(2, 2, dashboardLabel, colors.white, currentView == "overview" and colors.blue or colors.gray)
-    overviewBounds = { x1 = 2, x2 = 2 + #dashboardLabel - 1, y1 = 2, y2 = 2 }
-
-    local modulesLabel = "[ MODULES ]"
-    local x = 2 + #dashboardLabel + 2
-    writeAt(x, 2, modulesLabel, colors.white, currentView == "modules" and colors.blue or colors.gray)
-    modulesBounds = { x1 = x, x2 = x + #modulesLabel - 1, y1 = 2, y2 = 2 }
-end
-
-local function drawModuleNavigation(list)
-    prevBounds = nil
-    nextBounds = nil
-
-    local index = selectedIndex(list)
-    if not index then return end
-
-    if index > 1 then
-        local label = "[ < ]"
-        writeAt(2, 3, label, colors.white, colors.gray)
-        prevBounds = { x1 = 2, x2 = 2 + #label - 1, y1 = 3, y2 = 3 }
-    end
-
-    local module = list[index]
-    local label = "[ " .. tostring(module.label or module.id) .. " ]"
-    centered(3, label, colors.cyan)
-
-    if index < #list then
-        local nextLabel = "[ > ]"
-        local x = math.max(8, width - #nextLabel - 1)
-        writeAt(x, 3, nextLabel, colors.white, colors.gray)
-        nextBounds = { x1 = x, x2 = x + #nextLabel - 1, y1 = 3, y2 = 3 }
-    end
 end
 
 local function doUpdate()
@@ -282,8 +216,6 @@ local function doUpdate()
 end
 
 local function renderOverview(now, list)
-    moduleRowBounds = {}
-
     local onlineCount = 0
     local faultCount = 0
 
@@ -347,209 +279,12 @@ local function renderOverview(now, list)
             writeAt(49, y, health, healthColor(health))
 
             local reason = tostring(module.reason or "")
-            if reason == "" then reason = "Touchez pour ouvrir" end
+            if reason == "" then reason = "-" end
             writeAt(4, y + 1, reason, colors.lightGray)
         end
 
-        moduleRowBounds[#moduleRowBounds + 1] = {
-            x1 = 1,
-            x2 = width,
-            y1 = y,
-            y2 = math.min(height, y + 1),
-            id = module.id,
-        }
 
         y = y + 3
-    end
-end
-
-local function renderModulesMap(now, list)
-    moduleRowBounds = {}
-
-    centered(4, "MODULES - FACTORY MAP", colors.cyan)
-
-    if modemCount == 0 then
-        centered(7, "AUCUN MODEM REDNET", colors.red)
-        return
-    end
-
-    if #list == 0 then
-        centered(7, "EN ATTENTE DE MODULES...", colors.orange)
-        return
-    end
-
-    local columns = width >= 48 and 2 or 1
-    local gap = 2
-    local cardWidth
-
-    if columns == 2 then
-        cardWidth = math.floor((width - 5) / 2)
-    else
-        cardWidth = width - 3
-    end
-
-    local cardHeight = 6
-    local startY = 6
-
-    for index, module in ipairs(list) do
-        local col = (index - 1) % columns
-        local row = math.floor((index - 1) / columns)
-        local x = 2 + col * (cardWidth + gap)
-        local y = startY + row * cardHeight
-
-        if y + 4 > height - 3 then break end
-
-        local net, netColor = networkState(module, now)
-        local isOffline = net == "OFFLINE"
-        local label = tostring(module.label or module.id or "?")
-        local mode = isOffline and "N/A" or tostring(module.mode or "N/A")
-        local state = isOffline and "N/A" or tostring(module.state or "N/A")
-        local health = isOffline and "N/A" or tostring(module.health or "N/A")
-
-        writeAt(x, y, "[ " .. label .. " ]", colors.cyan)
-        writeAt(x, y + 1, "NET " .. net, netColor)
-        writeAt(x, y + 2, mode .. " | " .. state, isOffline and colors.gray or stateColor(state))
-        writeAt(x, y + 3, "HEALTH " .. health, isOffline and colors.gray or healthColor(health))
-
-        local summary = tostring(module.reason or "")
-        if summary == "" then
-            if isOffline then
-                summary = ("Last %.0fs"):format(statusAge(module, now))
-            else
-                summary = "Toucher pour ouvrir"
-            end
-        end
-        writeAt(x, y + 4, summary, colors.lightGray)
-
-        moduleRowBounds[#moduleRowBounds + 1] = {
-            x1 = x,
-            x2 = math.min(width, x + cardWidth - 1),
-            y1 = y,
-            y2 = y + 4,
-            id = module.id,
-        }
-    end
-end
-
-local function renderMetricList(module, startY, maxY)
-    local y = startY
-
-    if type(module.details) == "table" and #module.details > 0 then
-        for _, entry in ipairs(module.details) do
-            if y > maxY then break end
-
-            local label = tostring(entry.label or "METRIC")
-            local value = tostring(entry.value or "N/A")
-
-            writeAt(4, y, label, colors.gray)
-            writeAt(20, y, value, colors.white)
-            y = y + 1
-        end
-
-        return y
-    end
-
-    if type(module.metrics) == "table" then
-        local keys = {}
-        for key in pairs(module.metrics) do
-            table.insert(keys, key)
-        end
-        table.sort(keys)
-
-        for _, key in ipairs(keys) do
-            if y > maxY then break end
-
-            local value = module.metrics[key]
-            local displayValue
-
-            if type(value) == "number" and value >= 0 and value <= 1 then
-                displayValue = pct(value)
-            else
-                displayValue = tostring(value)
-            end
-
-            writeAt(4, y, tostring(key):upper(), colors.gray)
-            writeAt(20, y, displayValue, colors.white)
-            y = y + 1
-        end
-    end
-
-    return y
-end
-
-local function renderDetail(now, list)
-    moduleRowBounds = {}
-
-    local index = selectedIndex(list)
-    if not index then
-        currentView = "overview"
-        selectedModuleId = nil
-        renderOverview(now, list)
-        return
-    end
-
-    local module = list[index]
-    local net, netColor = networkState(module, now)
-    local isOffline = net == "OFFLINE"
-
-    centered(4, tostring(module.label or module.id), colors.cyan)
-
-    if module.version then
-        centered(5, "MODULE v" .. tostring(module.version), colors.gray)
-    end
-
-    writeAt(4, 7, "NETWORK", colors.gray)
-    writeAt(20, 7, net, netColor)
-
-    if isOffline then
-        writeAt(4, 9, "MODE", colors.gray)
-        writeAt(20, 9, "N/A", colors.gray)
-        writeAt(4, 10, "STATE", colors.gray)
-        writeAt(20, 10, "N/A", colors.gray)
-        writeAt(4, 11, "HEALTH", colors.gray)
-        writeAt(20, 11, "N/A", colors.gray)
-
-        centered(15, "MODULE OFFLINE", colors.red)
-        centered(17, ("Dernier statut : %.0f s"):format(statusAge(module, now)), colors.gray)
-        return
-    end
-
-    local mode = tostring(module.mode or "N/A")
-    local state = tostring(module.state or "N/A")
-    local health = tostring(module.health or "N/A")
-
-    writeAt(4, 9, "MODE", colors.gray)
-    writeAt(20, 9, mode, modeColor(mode))
-
-    writeAt(4, 10, "STATE", colors.gray)
-    writeAt(20, 10, state, stateColor(state))
-
-    writeAt(4, 11, "HEALTH", colors.gray)
-    writeAt(20, 11, health, healthColor(health))
-
-    if type(module.activeLines) == "number" and type(module.totalLines) == "number" then
-        writeAt(4, 12, "LINES", colors.gray)
-        writeAt(20, 12, ("%d/%d"):format(module.activeLines, module.totalLines), colors.white)
-    end
-
-    local reason = tostring(module.reason or "")
-    if reason ~= "" then
-        writeAt(4, 14, "STATUS", colors.gray)
-        writeAt(20, 14, reason, colors.lightGray)
-    end
-
-    writeAt(4, 16, "DETAILS", colors.cyan)
-    local nextY = renderMetricList(module, 18, height - 6)
-
-    if type(module.alarms) == "table" and #module.alarms > 0 and nextY <= height - 4 then
-        writeAt(4, nextY + 1, "ALARMS", colors.red)
-        local alarmY = nextY + 2
-
-        for _, alarm in ipairs(module.alarms) do
-            if alarmY > height - 3 then break end
-            writeAt(6, alarmY, tostring(alarm), colors.orange)
-            alarmY = alarmY + 1
-        end
     end
 end
 
@@ -563,23 +298,7 @@ render = function()
     monitor.clear()
 
     centered(1, "FACTORY DASHBOARD  v" .. PROGRAM_VERSION, colors.cyan)
-
-    overviewBounds = nil
-    modulesBounds = nil
-    prevBounds = nil
-    nextBounds = nil
-    moduleRowBounds = {}
-
-    drawTopNavigation()
-
-    if currentView == "module" then
-        drawModuleNavigation(list)
-        renderDetail(now, list)
-    elseif currentView == "modules" then
-        renderModulesMap(now, list)
-    else
-        renderOverview(now, list)
-    end
+    renderOverview(now, list)
 
     local footer = ("Rednet:%d | %s"):format(modemCount, STATUS_PROTOCOL)
     writeAt(2, height, footer, colors.gray)
@@ -628,48 +347,16 @@ local function uiLoop()
         elseif event == "monitor_touch" and p1 == monitorName then
             local x, y = p2, p3
             local now = nowSeconds()
-            local list = sortedModules()
 
-            if inside(overviewBounds, x, y) then
-                currentView = "overview"
-                selectedModuleId = nil
+            if updateBounds
+                and x >= updateBounds.x1 and x <= updateBounds.x2
+                and y >= updateBounds.y1 and y <= updateBounds.y2
+                and not updateInProgress then
 
-            elseif inside(modulesBounds, x, y) then
-                currentView = "modules"
-                selectedModuleId = nil
-
-            elseif inside(prevBounds, x, y) then
-                local index = selectedIndex(list)
-                if index and index > 1 then
-                    selectedModuleId = list[index - 1].id
-                end
-
-            elseif inside(nextBounds, x, y) then
-                local index = selectedIndex(list)
-                if index and index < #list then
-                    selectedModuleId = list[index + 1].id
-                end
-
-            else
-                local handled = false
-
-                if currentView == "overview" or currentView == "modules" then
-                    for _, bounds in ipairs(moduleRowBounds) do
-                        if inside(bounds, x, y) then
-                            selectedModuleId = bounds.id
-                            currentView = "module"
-                            handled = true
-                            break
-                        end
-                    end
-                end
-
-                if not handled and inside(updateBounds, x, y) and not updateInProgress then
-                    if now < updateConfirmUntil then
-                        doUpdate()
-                    else
-                        updateConfirmUntil = now + 8
-                    end
+                if now < updateConfirmUntil then
+                    doUpdate()
+                else
+                    updateConfirmUntil = now + 8
                 end
             end
 
