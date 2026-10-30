@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.4.2"
+local PROGRAM_VERSION = "0.4.5"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -692,6 +692,14 @@ end
 
 render = function()
     local now = nowSeconds()
+
+    -- Clear the physical monitor too. The Supervisor renders through a window,
+    -- and switching between views with different title lengths can otherwise
+    -- leave stale characters visible behind that window.
+    physicalMonitor.setBackgroundColor(colors.black)
+    physicalMonitor.setTextColor(colors.white)
+    physicalMonitor.clear()
+
     monitor.setVisible(false)
     monitor.setBackgroundColor(colors.black)
     monitor.setTextColor(colors.white)
