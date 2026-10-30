@@ -1,6 +1,7 @@
-local PROGRAM_VERSION = "0.1.0"
+local PROGRAM_VERSION = "0.1.1"
 local CONFIG_PATH = "/config/factory_biofuel.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
+local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 local UPDATE_MANIFEST = "programs/factory/biofuel_update_manifest.lua"
 
 local defaults = {
@@ -11,6 +12,13 @@ local defaults = {
     inputBarrel = "sophisticatedstorage:barrel_0",
     crusher = "ultimateCrushingFactory_0",
     outputBarrel = "sophisticatedstorage:barrel_1",
+
+    status = {
+        publishSeconds = 2,
+        id = "biofuel",
+        label = "BIOFUEL",
+        type = "process",
+    },
 }
 
 local function loadConfig()
@@ -19,10 +27,17 @@ local function loadConfig()
     local ok, cfg = pcall(dofile, CONFIG_PATH)
     if not ok or type(cfg) ~= "table" then return defaults end
 
-    for key, value in pairs(defaults) do
-        if cfg[key] == nil then cfg[key] = value end
+    local function mergeMissing(target, source)
+        for key, value in pairs(source) do
+            if target[key] == nil then
+                target[key] = value
+            elseif type(target[key]) == "table" and type(value) == "table" then
+                mergeMissing(target[key], value)
+            end
+        end
     end
 
+    mergeMissing(cfg, defaults)
     return cfg
 end
 
@@ -208,6 +223,79 @@ local function collectData()
     }
 end
 
+local function ratio(value, maximum)
+    if type(value) ~= "number" or type(maximum) ~= "number" or maximum <= 0 then
+        return nil
+    end
+
+    return math.max(0, math.min(1, value / maximum))
+end
+
+local function buildModuleStatus(data)
+    local health = data.online and "OK" or "FAULT"
+    local state = "IDLE"
+    local alarms = {}
+
+    if not data.online then
+        state = "STOP"
+        table.insert(alarms, "CRITICAL PERIPHERAL MISSING")
+    elseif data.crusherState == "RUN" then
+        state = "RUN"
+    elseif data.crusherState == "HIGH" then
+        state = "STOP"
+    end
+
+    local inputText =
+        itemLabel(data.input.itemName) .. " x" .. tostring(data.input.count or 0)
+    local outputText =
+        "BIO FUEL x" .. tostring(data.output.count or 0)
+
+    return {
+        contract = 1,
+        id = config.status.id,
+        label = config.status.label,
+        type = config.status.type,
+        version = PROGRAM_VERSION,
+
+        mode = "MANUAL",
+        state = state,
+        health = health,
+        reason = inputText .. " -> " .. outputText,
+
+        metrics = {
+            energy = data.energyFill,
+        },
+
+        details = {
+            { label = "INPUT", value = inputText },
+            { label = "OUTPUT", value = outputText },
+            { label = "CRUSHER", value = tostring(data.crusherState) },
+            {
+                label = "ENERGY",
+                value = type(data.energyFill) == "number"
+                    and ("%.1f%%"):format(data.energyFill * 100)
+                    or "N/A",
+            },
+            {
+                label = "USAGE",
+                value = compact(data.energyUsage, " FE/t"),
+            },
+        },
+
+        alarms = alarms,
+    }
+end
+
+local function loadStatusBus()
+    if not fs.exists(STATUS_BUS_PATH) then return nil end
+
+    local ok, bus = pcall(dofile, STATUS_BUS_PATH)
+    if not ok or type(bus) ~= "table" then return nil end
+
+    pcall(bus.open)
+    return bus
+end
+
 local function drawUpdateButton(now)
     local label
 
@@ -391,6 +479,23 @@ local function uiLoop()
     end
 end
 
+local function statusLoop()
+    local statusBus = loadStatusBus()
+
+    while true do
+        if not statusBus then
+            statusBus = loadStatusBus()
+        end
+
+        if statusBus and dataCache then
+            local packet = buildModuleStatus(dataCache)
+            pcall(statusBus.broadcastStatus, packet)
+        end
+
+        sleep(config.status.publishSeconds)
+    end
+end
+
 local function dataLoop()
     while true do
         local ok, fresh = pcall(collectData)
@@ -407,4 +512,4 @@ local function dataLoop()
     end
 end
 
-parallel.waitForAny(uiLoop, dataLoop)
+parallel.waitForAny(uiLoop, dataLoop, statusLoop)
