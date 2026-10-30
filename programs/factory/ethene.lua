@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.1.2"
+local PROGRAM_VERSION = "0.2.0"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 
 local defaults = {
@@ -253,6 +253,12 @@ local function readLine(lineCfg)
         prcState=prcState,
         state=state,
         substrateCount=substrateCount,
+
+        pumpFluidFill=safeCall(pump, "getFluidFilledPercentage"),
+        pumpEnergy=safeCall(pump, "getEnergy"),
+        pumpMaxEnergy=safeCall(pump, "getMaxEnergy"),
+        pumpEnergyUsage=safeCall(pump, "getEnergyUsage"),
+
         inputItem=safeCall(prc, "getInputItem"),
         inputGasFill=safeCall(prc, "getInputGasFilledPercentage"),
         outputGasFill=safeCall(prc, "getOutputGasFilledPercentage"),
@@ -473,6 +479,7 @@ local function buildModuleStatus(data)
     local substrateTotal = countSubstrate(data)
 
     local lines = {}
+    local machines = {}
     local activeLines = 0
 
     for _, line in ipairs(data.lines) do
@@ -484,6 +491,41 @@ local function buildModuleStatus(data)
             pumpState=line.pumpState,
             prcState=line.prcState,
             substrateCount=line.substrateCount,
+            energy=line.energy,
+            maxEnergy=line.maxEnergy,
+            energyUsage=line.energyUsage,
+        })
+
+        table.insert(machines, {
+            kind="PUMP",
+            name=line.pump,
+            lineId=line.id,
+            state=line.pumpState,
+            waterFill=line.water.fill,
+            fluidFill=line.pumpFluidFill,
+            energy=line.pumpEnergy,
+            maxEnergy=line.pumpMaxEnergy,
+            energyUsage=line.pumpEnergyUsage,
+        })
+
+        local inputName=nil
+        local inputCount=nil
+        if type(line.inputItem)=="table" then
+            inputName=line.inputItem.name
+            inputCount=line.inputItem.count
+        end
+
+        table.insert(machines, {
+            kind="PRC",
+            name=line.prc,
+            lineId=line.id,
+            state=line.prcState,
+            waterFill=line.water.fill,
+            hydrogenFill=line.inputGasFill,
+            etheneFill=line.outputGasFill,
+            substrateCount=line.substrateCount,
+            inputItemName=inputName,
+            inputItemCount=inputCount,
             energy=line.energy,
             maxEnergy=line.maxEnergy,
             energyUsage=line.energyUsage,
@@ -542,6 +584,7 @@ local function buildModuleStatus(data)
 
             targetLines=autoState.targetLines,
             lines=lines,
+            machines=machines,
         },
 
         details={
@@ -653,6 +696,9 @@ local function controlLoop()
                     break
                 end
             end
+
+        elseif operatingMode == "MANUAL" and action == "machine" then
+            setDeviceMode(target, targetMode)
         end
 
         local ok, fresh = pcall(collectData)
