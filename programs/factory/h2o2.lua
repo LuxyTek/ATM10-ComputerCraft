@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.8.0"
+local PROGRAM_VERSION = "0.8.1"
 local args = { ... }
 local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
@@ -1032,6 +1032,18 @@ local function buildModuleStatus(data)
             oxygen = ratio(data.oxygen, data.oxygenCapacity),
         },
 
+        ui = {
+            energy = data.energy,
+            maxEnergy = data.maxEnergy,
+            usage = data.usage,
+            separatorResponding = data.separatorResponding,
+            separatorRunning = data.separatorRunning,
+            controlState = data.controlState,
+            targetLines = autoState.targetLines,
+            lines = data.lines,
+            machines = data.machines,
+        },
+
         alarms = alarms,
     }
 end
@@ -1565,6 +1577,8 @@ local function renderMachines(data)
 end
 
 local function render()
+    if HEADLESS then return end
+
     local now = os.epoch("utc") / 1000
     local data = dataCache
 
@@ -1980,8 +1994,16 @@ local function dataLoop()
     end
 end
 
+local function supervisorModeLoop()
+    while true do
+        os.pullEvent("factory_h2o2_mode_toggle")
+        toggleOperatingMode()
+        os.queueEvent("factory_refresh")
+    end
+end
+
 if HEADLESS then
-    parallel.waitForAny(dataLoop, controlLoop, autoLoop, statusLoop)
+    parallel.waitForAny(dataLoop, controlLoop, autoLoop, statusLoop, supervisorModeLoop)
 else
     parallel.waitForAny(uiLoop, dataLoop, controlLoop, autoLoop, statusLoop)
 end
