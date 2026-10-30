@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.3.0"
+local PROGRAM_VERSION = "0.3.1"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 
 local defaults = {
@@ -161,15 +161,43 @@ local function readChemicalTank(name)
 
     local dev = peripheral.wrap(name)
     local stored = safeCall(dev, "getStored")
-    local capacity = safeCall(dev, "getCapacity")
-    local amount = type(stored) == "table" and tonumber(stored.amount) or 0
+
+    local capacity =
+        tonumber(safeCall(dev, "getCapacity"))
+        or tonumber(safeCall(dev, "getChemicalTankCapacity"))
+        or 0
+
+    local amount =
+        (type(stored) == "table" and tonumber(stored.amount))
+        or tonumber(safeCall(dev, "getStoredAmount"))
+        or tonumber(safeCall(dev, "getAmount"))
+        or 0
+
+    -- Prefer Mekanism's native percentage when exposed by the peripheral.
+    -- This avoids bad ratios on very large Chemical Tanks where raw amount /
+    -- capacity telemetry may not use the exact same representation.
+    local directFill =
+        tonumber(safeCall(dev, "getFilledPercentage"))
+        or tonumber(safeCall(dev, "getStoredFilledPercentage"))
+        or tonumber(safeCall(dev, "getChemicalFilledPercentage"))
+
+    local fill = directFill
+    if type(fill) ~= "number" then
+        fill = ratio(amount, capacity)
+    elseif fill > 1 and fill <= 100 then
+        fill = fill / 100
+    end
+
+    if type(fill) == "number" then
+        fill = math.max(0, math.min(1, fill))
+    end
 
     return {
         present=true,
         name=type(stored) == "table" and stored.name or nil,
-        amount=amount or 0,
-        capacity=tonumber(capacity) or 0,
-        fill=ratio(amount or 0, tonumber(capacity) or 0),
+        amount=amount,
+        capacity=capacity,
+        fill=fill,
     }
 end
 
