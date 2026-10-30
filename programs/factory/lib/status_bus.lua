@@ -41,8 +41,12 @@ function M.broadcastStatus(packet)
         return false, "invalid factory status packet"
     end
 
+    -- Local delivery lets the Factory Supervisor receive statuses from
+    -- headless modules running on the same Computer without Rednet loopback.
+    os.queueEvent("factory_local_status", packet)
+
     if not rednet.isOpen() and M.open() == 0 then
-        return false, "no rednet modem"
+        return true, "local only"
     end
 
     local ok = rednet.broadcast(packet, M.STATUS_PROTOCOL)
