@@ -1,4 +1,6 @@
-local PROGRAM_VERSION = "0.7.9"
+local PROGRAM_VERSION = "0.8.0"
+local args = { ... }
+local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
@@ -83,11 +85,17 @@ local function getMonitor()
     error("Aucun monitor detecte")
 end
 
-local physicalMonitor, monitorName = getMonitor()
-physicalMonitor.setTextScale(config.textScale)
+local physicalMonitor = nil
+local monitorName = nil
+local width, height = 0, 0
+local monitor = nil
 
-local width, height = physicalMonitor.getSize()
-local monitor = window.create(physicalMonitor, 1, 1, width, height, false)
+if not HEADLESS then
+    physicalMonitor, monitorName = getMonitor()
+    physicalMonitor.setTextScale(config.textScale)
+    width, height = physicalMonitor.getSize()
+    monitor = window.create(physicalMonitor, 1, 1, width, height, false)
+end
 
 local currentPage = "overview"
 local machinePage = 1
@@ -1972,4 +1980,8 @@ local function dataLoop()
     end
 end
 
-parallel.waitForAny(uiLoop, dataLoop, controlLoop, autoLoop, statusLoop)
+if HEADLESS then
+    parallel.waitForAny(dataLoop, controlLoop, autoLoop, statusLoop)
+else
+    parallel.waitForAny(uiLoop, dataLoop, controlLoop, autoLoop, statusLoop)
+end
