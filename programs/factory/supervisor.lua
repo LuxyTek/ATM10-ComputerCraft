@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.6.0"
+local PROGRAM_VERSION = "0.6.1"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -693,17 +693,9 @@ local function renderEthene(now, module)
         type(ui.biofuelFill)=="number" and string.format("%.1f%%",ui.biofuelFill*100) or "N/A"
     ),colors.yellow)
 
-    local extractText="UNKNOWN"
-    local extractColor=colors.orange
-    if ui.extractionSupport == true then
-        extractText="CC AUTO"
-        extractColor=colors.lime
-    elseif ui.extractionSupport == false then
-        extractText="MANUAL"
-        extractColor=colors.orange
-    end
-
-    writeAt(3,13,"SUBSTRATE : "..tostring(ui.substrateTotal or 0).." | EXTRACTION "..extractText,extractColor)
+    local substrateTotal=tonumber(ui.substrateTotal) or 0
+    local substrateColor=substrateTotal >= 96 and colors.orange or colors.lightGray
+    writeAt(3,13,"SUBSTRATE : "..tostring(substrateTotal).." | OUTPUT QE",substrateColor)
     writeAt(3,14,"WASTE BUF : "..tostring(ui.wasteCount or 0),colors.lightGray)
 
     local lines=type(ui.lines)=="table" and ui.lines or {}
@@ -713,7 +705,9 @@ local function renderEthene(now, module)
     local y=17
     for _,line in ipairs(lines) do
         writeAt(4,y,tostring(line.id),colors.white)
-        writeAt(14,y,tostring(line.state),stateColor(line.state))
+        local lineDisplayState=tostring(line.state)
+        if (tonumber(line.substrateCount) or 0) >= 64 then lineDisplayState="HOLD" end
+        writeAt(14,y,lineDisplayState,stateColor(lineDisplayState))
         writeAt(24,y,("WATER %s"):format(
             type(line.waterFill)=="number" and string.format("%.0f%%",line.waterFill*100) or "N/A"
         ),colors.blue)
