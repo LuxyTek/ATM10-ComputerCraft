@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.3.0"
+local PROGRAM_VERSION = "0.3.1"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 
 local defaults = {
@@ -420,6 +420,21 @@ local function countSubstrate(data)
     return total, maxStack
 end
 
+local function prcBiofuelCount(line)
+    if type(line) ~= "table" or type(line.inputItem) ~= "table" then
+        return 0
+    end
+    return math.max(0, tonumber(line.inputItem.count) or 0)
+end
+
+local function totalPrcBiofuel(data)
+    local total = 0
+    for _, line in ipairs(data.lines or {}) do
+        total = total + prcBiofuelCount(line)
+    end
+    return total
+end
+
 local function applyAuto(data)
     if operatingMode ~= "AUTO" then return end
 
@@ -484,7 +499,13 @@ local function applyAuto(data)
         return
     end
 
-    if (tonumber(data.biofuel.count) or 0) <= 0 then
+    local biofuelBufferCount = tonumber(data.biofuel.count) or 0
+    local biofuelBufferAvailable = biofuelBufferCount > 0
+    local internalBiofuel = totalPrcBiofuel(data)
+
+    -- The central Biofuel barrel may be empty while PRCs still contain fuel
+    -- in their own input slots. Consume that local reserve before HOLD.
+    if not biofuelBufferAvailable and internalBiofuel <= 0 then
         autoState.targetLines = 0
         autoState.reason = "HOLD BIOFUEL"
         setProductionMode(config.stopMode)
@@ -523,7 +544,12 @@ local function applyAuto(data)
     for index, lineCfg in ipairs(config.lines) do
         local line = data.lines[index]
         local waterBlocked = autoState.waterHold[line.id] == true
+        local lineHasBiofuel =
+            biofuelBufferAvailable
+            or prcBiofuelCount(line) > 0
+
         local enable = running < desired
+            and lineHasBiofuel
             and not waterBlocked
             and line.water.present
             and line.pumpPresent
@@ -541,6 +567,8 @@ local function applyAuto(data)
 
     if running == 0 then
         autoState.reason = "HOLD WATER"
+    elseif not biofuelBufferAvailable then
+        autoState.reason = ("PRODUCTION %d/2 | BIOFUEL BUFFER EMPTY"):format(running)
     elseif substrateMax >= config.auto.substrateWarn then
         autoState.reason = ("PRODUCTION %d/2 | SUBSTRATE HIGH"):format(running)
     elseif autoState.liquidHold then
@@ -721,6 +749,7 @@ local function buildModuleStatus(data)
             biofuelCount=data.biofuel.count,
             biofuelCapacity=config.biofuelCapacity,
             biofuelFill=ratio(data.biofuel.count, config.biofuelCapacity),
+            biofuelPrcReserve=totalPrcBiofuel(data),
 
             substrateTotal=substrateTotal,
             outputPath="QE",
