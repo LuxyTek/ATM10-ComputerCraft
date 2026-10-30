@@ -78,6 +78,7 @@ local function loadConfig()
 end
 
 local config = loadConfig()
+local hydrogenTankRoleCache = {}
 
 local operatingMode = "AUTO"
 local dataCache = nil
@@ -248,9 +249,17 @@ local function findHydrogen()
         if pType:find("chemicaltank", 1, true) then
             local dev = peripheral.wrap(name)
             local stored = safeCall(dev, "getStored")
-            if type(stored) == "table" and stored.name == "mekanism:hydrogen" then
+            local chemical = type(stored) == "table" and stored.name or nil
+
+            if chemical == "mekanism:hydrogen" then
+                hydrogenTankRoleCache[name] = true
+            elseif chemical ~= nil then
+                hydrogenTankRoleCache[name] = nil
+            end
+
+            if hydrogenTankRoleCache[name] then
                 local cap = tonumber(safeCall(dev, "getCapacity")) or 0
-                amount = amount + (tonumber(stored.amount) or 0)
+                amount = amount + (type(stored) == "table" and (tonumber(stored.amount) or 0) or 0)
                 capacity = capacity + cap
                 count = count + 1
             end
@@ -445,8 +454,10 @@ local function applyAuto(data)
     end
 
     if autoState.liquidHold then
-        setDeviceMode(config.condensentrator, config.stopMode)
-    else
+        if data.condensentrator.state ~= "STOP" then
+            setDeviceMode(config.condensentrator, config.stopMode)
+        end
+    elseif data.condensentrator.state ~= "RUN" then
         setDeviceMode(config.condensentrator, "DISABLED")
     end
 
@@ -542,7 +553,13 @@ end
 local function moduleState(data)
     if not data or not data.online then return "STOP" end
 
-    if data.condensentrator and data.condensentrator.state == "RUN" then
+    local conversionUsage =
+        data.condensentrator and tonumber(data.condensentrator.energyUsage) or nil
+    local conversionActive =
+        conversionUsage ~= nil
+        and conversionUsage > 0
+
+    if conversionActive then
         return "RUN"
     end
 
@@ -566,6 +583,11 @@ local function healthState(data)
 
     local _, substrateMax = countSubstrate(data)
     if substrateMax >= config.auto.substrateWarn then
+        return "WARN"
+    end
+
+    if data.condensentrator
+        and (data.condensentrator.state == "UNKNOWN" or data.condensentrator.state == "WARN") then
         return "WARN"
     end
 
@@ -636,9 +658,10 @@ local function buildModuleStatus(data)
         name=config.condensentrator,
         lineId="CONVERSION",
         state=data.condensentrator.state,
-        inputFill=data.condensentrator.inputFill,
+        inputFill=data.condensentrator.inputFill or data.ethene.fill,
         outputFill=data.condensentrator.outputFill,
         liquidFill=data.liquidEthene.fill,
+        hold=autoState.liquidHold == true,
         liquidName=data.liquidEthene.name,
         energy=data.condensentrator.energy,
         maxEnergy=data.condensentrator.maxEnergy,
