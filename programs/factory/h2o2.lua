@@ -122,10 +122,10 @@ local controlPending = nil
 local controlPendingSince = 0
 local CONTROL_WATCHDOG_SECONDS = 5
 
-local operatingMode = "MANUAL"
+local operatingMode = "AUTO"
 local autoState = {
     targetLines = 0,
-    reason = "MANUAL",
+    reason = "INITIALISATION",
     stage = nil,
     waterHold = false,
     chemicalHold = false,
