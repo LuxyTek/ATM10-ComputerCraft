@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.6.1"
+local PROGRAM_VERSION = "0.6.2"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -696,7 +696,7 @@ local function renderEthene(now, module)
     local substrateTotal=tonumber(ui.substrateTotal) or 0
     local substrateColor=substrateTotal >= 96 and colors.orange or colors.lightGray
     writeAt(3,13,"SUBSTRATE : "..tostring(substrateTotal).." | OUTPUT QE",substrateColor)
-    writeAt(3,14,"WASTE BUF : "..tostring(ui.wasteCount or 0),colors.lightGray)
+    writeAt(3,14,"WASTE BUF : "..(ui.wastePresent == false and "N/A" or tostring(ui.wasteCount or 0)),colors.lightGray)
 
     local lines=type(ui.lines)=="table" and ui.lines or {}
     local mode=tostring(module.mode or "AUTO")
@@ -850,7 +850,6 @@ render = function()
     monitor.setTextColor(colors.white)
     monitor.clear()
 
-    centered(1, "FACTORY SUPERVISOR  v" .. PROGRAM_VERSION, colors.cyan)
     updateBounds = nil
     backBounds = nil
     moduleBounds = {}
@@ -873,6 +872,7 @@ render = function()
     elseif currentView == "detail" then
         renderDetail(now)
     else
+        centered(1, "FACTORY SUPERVISOR  v" .. PROGRAM_VERSION, colors.cyan)
         renderMap(now, sortedModules())
     end
 
