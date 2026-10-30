@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.1.0"
+local PROGRAM_VERSION = "0.1.1"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -137,6 +137,26 @@ local function modeColor(mode)
     return colors.lightGray
 end
 
+local function runtimeState(module, offline)
+    if offline then return "OFFLINE", colors.red end
+
+    local explicit = tostring(module.runtimeState or "")
+    if explicit == "ACTIVE" then return explicit, colors.lime end
+    if explicit == "IDLE" then return explicit, colors.lightGray end
+    if explicit == "SLEEP" then return explicit, colors.cyan end
+    if explicit == "FAULT" then return explicit, colors.red end
+
+    local health = tostring(module.health or "")
+    local state = tostring(module.state or "")
+
+    if health == "FAULT" then return "FAULT", colors.red end
+    if state == "RUN" then return "ACTIVE", colors.lime end
+    if state == "HOLD" or state == "IDLE" then return "IDLE", colors.lightGray end
+    if state == "STOP" then return "IDLE", colors.orange end
+
+    return "UNKNOWN", colors.gray
+end
+
 local function sortedModules()
     local result = {}
     for _, module in pairs(modules) do table.insert(result, module) end
@@ -209,7 +229,7 @@ local function renderMap(now, list)
     moduleBounds = {}
     backBounds = nil
 
-    centered(3, "MODULE MAP", colors.cyan)
+    centered(3, "FACTORY MODULE MAP", colors.cyan)
 
     if modemCount == 0 then
         centered(6, "AUCUN MODEM REDNET", colors.red)
@@ -239,16 +259,17 @@ local function renderMap(now, list)
         local mode = offline and "N/A" or tostring(module.mode or "N/A")
         local state = offline and "N/A" or tostring(module.state or "N/A")
         local health = offline and "N/A" or tostring(module.health or "N/A")
+        local runtime, runtimeColor = runtimeState(module, offline)
         local label = tostring(module.label or module.id or "?")
 
         writeAt(x, y, "[ " .. label .. " ]", colors.cyan)
-        writeAt(x, y + 1, "NETWORK  " .. net, netColor)
+        writeAt(x, y + 1, "RUNTIME  " .. runtime, runtimeColor)
         writeAt(x, y + 2, "MODE     " .. mode, offline and colors.gray or modeColor(mode))
         writeAt(x, y + 3, "STATE    " .. state, offline and colors.gray or stateColor(state))
         writeAt(x, y + 4, "HEALTH   " .. health, offline and colors.gray or healthColor(health))
 
         local reason = tostring(module.reason or "")
-        if reason == "" then reason = offline and "Pas de statut recent" or "Toucher pour ouvrir" end
+        if reason == "" then reason = offline and ("NETWORK " .. net) or "Toucher pour ouvrir" end
         writeAt(x, y + 5, reason, colors.lightGray)
 
         moduleBounds[#moduleBounds + 1] = {
@@ -323,25 +344,29 @@ local function renderDetail(now)
     local state = tostring(module.state or "N/A")
     local health = tostring(module.health or "N/A")
 
-    writeAt(4, 8, "MODE", colors.gray)
-    writeAt(21, 8, mode, modeColor(mode))
-    writeAt(4, 9, "STATE", colors.gray)
-    writeAt(21, 9, state, stateColor(state))
-    writeAt(4, 10, "HEALTH", colors.gray)
-    writeAt(21, 10, health, healthColor(health))
+    local runtime, runtimeColor = runtimeState(module, false)
+
+    writeAt(4, 8, "RUNTIME", colors.gray)
+    writeAt(21, 8, runtime, runtimeColor)
+    writeAt(4, 9, "MODE", colors.gray)
+    writeAt(21, 9, mode, modeColor(mode))
+    writeAt(4, 10, "STATE", colors.gray)
+    writeAt(21, 10, state, stateColor(state))
+    writeAt(4, 11, "HEALTH", colors.gray)
+    writeAt(21, 11, health, healthColor(health))
 
     if type(module.activeLines) == "number" and type(module.totalLines) == "number" then
-        writeAt(4, 11, "LINES", colors.gray)
-        writeAt(21, 11, ("%d/%d"):format(module.activeLines, module.totalLines), colors.white)
+        writeAt(4, 12, "LINES", colors.gray)
+        writeAt(21, 12, ("%d/%d"):format(module.activeLines, module.totalLines), colors.white)
     end
 
     if module.reason and tostring(module.reason) ~= "" then
-        writeAt(4, 13, "STATUS", colors.gray)
-        writeAt(21, 13, tostring(module.reason), colors.lightGray)
+        writeAt(4, 14, "STATUS", colors.gray)
+        writeAt(21, 14, tostring(module.reason), colors.lightGray)
     end
 
-    writeAt(4, 15, "SUPERVISION", colors.cyan)
-    local nextY = renderMetricList(module, 17, height - 5)
+    writeAt(4, 16, "SUPERVISION", colors.cyan)
+    local nextY = renderMetricList(module, 18, height - 5)
 
     if type(module.alarms) == "table" and #module.alarms > 0 and nextY <= height - 3 then
         writeAt(4, nextY + 1, "ALARMS", colors.red)
