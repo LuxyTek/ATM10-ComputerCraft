@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.9.2"
+local PROGRAM_VERSION = "0.9.3"
 local args = { ... }
 local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
@@ -145,6 +145,7 @@ local autoState = {
 }
 
 local dataCache = nil
+local publishImmediateStatus
 local runtimeState = {
     state = "ACTIVE",
     wakeReason = "BOOT",
@@ -625,6 +626,14 @@ local function decideAutoTarget(data)
         return 0, ("HOLD WATER %.0f%%"):format(waterFill * 100)
     end
 
+    if autoState.chemicalHold == nil then
+        local processWasStopped = data.controlState == "STOP"
+        autoState.chemicalHold =
+            processWasStopped
+            and h2Fill > config.auto.chemicalResume
+            and o2Fill > config.auto.chemicalResume
+    end
+
     if autoState.chemicalHold then
         if bothRecovered then
             autoState.chemicalHold = false
@@ -980,12 +989,12 @@ local function computeRuntimeState(data)
         return "FAULT"
     end
 
-    if operatingMode == "AUTO" and autoState.chemicalHold then
-        return "SLEEP"
-    end
-
     for _, line in ipairs(data.lines or {}) do
         if line.state == "RUN" then return "ACTIVE" end
+    end
+
+    if operatingMode == "AUTO" and autoState.chemicalHold then
+        return "SLEEP"
     end
 
     return "IDLE"
@@ -1764,7 +1773,7 @@ local function toggleOperatingMode()
         autoState.reason = "INITIALISATION"
         autoState.stage = nil
         autoState.waterHold = false
-        autoState.chemicalHold = false
+        autoState.chemicalHold = nil
         autoState.overflowHydrogen = false
         autoState.overflowOxygen = false
         autoState.surplusHydrogenHold = false
@@ -1990,13 +1999,17 @@ local function autoLoop()
                     os.queueEvent("factory_module_wake", "h2o2", "AUTO_RESUME")
                 end
 
+                if publishImmediateStatus then
+                    publishImmediateStatus()
+                end
+
                 os.queueEvent("factory_refresh")
             end
         end
     end
 end
 
-local function publishImmediateStatus()
+publishImmediateStatus = function()
     local statusBus = loadStatusBus()
     if statusBus and dataCache then
         local packet = buildModuleStatus(dataCache)
