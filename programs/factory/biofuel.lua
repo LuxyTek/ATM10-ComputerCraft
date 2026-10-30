@@ -19,8 +19,8 @@ local defaults = {
     auto = {
         -- L'AUTO reste disponible mais ne peut pas determiner "plein"
         -- tant que targetItems n'est pas renseigne.
-        targetItems = nil,
-        resumeItems = nil,
+        targetItems = 270336,
+        resumeItems = 216269,
         checkSeconds = 2,
     },
 
@@ -85,10 +85,10 @@ local updateMessageUntil = 0
 local updateInProgress = false
 local dataCache = nil
 
-local operatingMode = "MANUAL"
+local operatingMode = "AUTO"
 local autoState = {
     hold = false,
-    reason = "MANUAL",
+    reason = "AUTO INIT",
     lastTick = 0,
 }
 
