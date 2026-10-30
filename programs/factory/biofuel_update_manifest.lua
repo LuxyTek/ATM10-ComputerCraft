@@ -1,5 +1,5 @@
 return {
-    version = "0.1.0",
+    version = "0.1.1",
 
     -- Runtime configuration is preserved.
     files = {
@@ -10,6 +10,10 @@ return {
         {
             remote = "programs/factory/lib/updater.lua",
             localPath = "/programs/factory/lib/updater.lua",
+        },
+        {
+            remote = "programs/factory/lib/status_bus.lua",
+            localPath = "/programs/factory/lib/status_bus.lua",
         },
         {
             remote = "programs/factory/biofuel_update_manifest.lua",
