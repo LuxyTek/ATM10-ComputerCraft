@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.3.2"
+local PROGRAM_VERSION = "0.3.3"
 local args = { ... }
 local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_biofuel.lua"
@@ -14,6 +14,8 @@ local defaults = {
     inputBarrel = "sophisticatedstorage:barrel_0",
     crusher = "ultimateCrushingFactory_0",
     outputBarrel = "sophisticatedstorage:barrel_1",
+    inputCapacity = 270336,
+    outputCapacity = 270336,
     stopMode = "HIGH",
 
     auto = {
@@ -369,7 +371,11 @@ local function buildModuleStatus(data)
         ui = {
             inputCount = data.input.count,
             inputItem = data.input.itemName,
+            inputCapacity = config.inputCapacity,
+            inputFill = ratio(data.input.count, config.inputCapacity),
             outputCount = data.output.count,
+            outputCapacity = config.outputCapacity,
+            outputFill = ratio(data.output.count, config.outputCapacity),
             crusherState = data.crusherState,
             energy = data.energy,
             maxEnergy = data.maxEnergy,
