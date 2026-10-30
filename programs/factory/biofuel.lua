@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.3.0"
+local PROGRAM_VERSION = "0.3.1"
 local args = { ... }
 local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_biofuel.lua"
@@ -222,10 +222,12 @@ local function collectData()
         crusherState = "ABSENT"
     elseif redstoneMode == "DISABLED" then
         crusherState = "RUN"
+    elseif redstoneMode == config.stopMode then
+        crusherState = "STOP"
     elseif redstoneMode == nil then
         crusherState = "UNKNOWN"
     else
-        crusherState = tostring(redstoneMode)
+        crusherState = "WARN"
     end
 
     return {
@@ -276,7 +278,7 @@ local function applyAuto(data)
     if operatingMode ~= "AUTO" then return end
 
     if not autoConfigured() then
-        autoState.reason = "AUTO WAIT TARGET"
+        autoState.reason = "WAIT TARGET CONFIG"
         return
     end
 
@@ -302,7 +304,7 @@ local function applyAuto(data)
     end
 
     if (tonumber(data.input.count) or 0) <= 0 then
-        autoState.reason = "INPUT EMPTY"
+        autoState.reason = "HOLD INPUT EMPTY"
         pcall(setCrusherMode, config.stopMode)
         return
     end
@@ -329,8 +331,10 @@ local function buildModuleStatus(data)
         table.insert(alarms, "CRITICAL PERIPHERAL MISSING")
     elseif data.crusherState == "RUN" then
         state = "RUN"
-    elseif data.crusherState == "HIGH" then
+    elseif data.crusherState == "STOP" then
         state = "STOP"
+    elseif data.crusherState == "UNKNOWN" or data.crusherState == "WARN" then
+        state = "IDLE"
     end
 
     local inputText =
@@ -352,7 +356,11 @@ local function buildModuleStatus(data)
             health == "FAULT" and "FAULT"
             or (operatingMode == "AUTO" and autoState.hold and "IDLE")
             or (state == "RUN" and "ACTIVE" or "IDLE"),
-        reason = operatingMode == "AUTO" and autoState.reason or (inputText .. " -> " .. outputText),
+        reason = operatingMode == "AUTO"
+            and autoState.reason
+            or (data.crusherState == "RUN" and "MANUAL RUN"
+                or data.crusherState == "STOP" and "MANUAL STOP"
+                or "MANUAL " .. tostring(data.crusherState)),
 
         metrics = {
             energy = data.energyFill,
