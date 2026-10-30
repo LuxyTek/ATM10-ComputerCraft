@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.1.1"
+local PROGRAM_VERSION = "0.1.2"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 
 local defaults = {
@@ -280,7 +280,7 @@ local function collectData()
     local ethene = readChemicalTank(config.etheneTank)
     local hydrogen = findHydrogen()
 
-    if not biofuel.present or not waste.present or not ethene.present or not hydrogen.present then
+    if not biofuel.present or not ethene.present or not hydrogen.present then
         criticalPresent = false
     end
 
@@ -535,6 +535,7 @@ local function buildModuleStatus(data)
             biofuelCapacity=config.biofuelCapacity,
             biofuelFill=ratio(data.biofuel.count, config.biofuelCapacity),
 
+            wastePresent=data.waste.present,
             wasteCount=data.waste.count,
             substrateTotal=substrateTotal,
             outputPath="QE",
