@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.3.1"
+local PROGRAM_VERSION = "0.3.2"
 local args = { ... }
 local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_biofuel.lua"
@@ -593,6 +593,14 @@ local function uiLoop()
     end
 end
 
+local function publishImmediateStatus()
+    local statusBus = loadStatusBus()
+    if statusBus and dataCache then
+        local packet = buildModuleStatus(dataCache)
+        pcall(statusBus.broadcastStatus, packet)
+    end
+end
+
 local function statusLoop()
     local statusBus = loadStatusBus()
 
@@ -644,6 +652,9 @@ local function supervisorControlLoop()
             pcall(setCrusherMode, targetMode)
         end
 
+        local refreshOK, fresh = pcall(collectData)
+        if refreshOK then dataCache = fresh end
+        publishImmediateStatus()
         os.queueEvent("factory_biofuel_refresh")
     end
 end
@@ -660,6 +671,7 @@ local function autoLoop()
             else
                 autoState.reason = "AUTO FAULT"
             end
+            publishImmediateStatus()
             os.queueEvent("factory_biofuel_refresh")
         end
     end
