@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.5.2"
+local PROGRAM_VERSION = "0.5.3"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -286,7 +286,7 @@ local function renderMap(now, list)
     local columns = width >= 48 and 2 or 1
     local gap = 2
     local cardWidth = columns == 2 and math.floor((width - 5) / 2) or width - 3
-    local cardHeight = 7
+    local cardHeight = 8
     local startY = 5
 
     for index, module in ipairs(list) do
@@ -294,7 +294,7 @@ local function renderMap(now, list)
         local row = math.floor((index - 1) / columns)
         local x = 2 + col * (cardWidth + gap)
         local y = startY + row * cardHeight
-        if y + 5 > height - 2 then break end
+        if y + 6 > height - 2 then break end
 
         local net, netColor = networkState(module, now)
         local offline = net == "OFFLINE"
@@ -306,17 +306,18 @@ local function renderMap(now, list)
 
         writeAt(x, y, "[ " .. label .. " ]", colors.cyan)
         writeAt(x, y + 1, "RUNTIME  " .. runtime, runtimeColor)
-        writeAt(x, y + 2, "MODE     " .. mode, offline and colors.gray or modeColor(mode))
-        writeAt(x, y + 3, "STATE    " .. state, offline and colors.gray or stateColor(state))
-        writeAt(x, y + 4, "HEALTH   " .. health, offline and colors.gray or healthColor(health))
+
+        writeAt(x, y + 3, "MODE     " .. mode, offline and colors.gray or modeColor(mode))
+        writeAt(x, y + 4, "STATE    " .. state, offline and colors.gray or stateColor(state))
+        writeAt(x, y + 5, "HEALTH   " .. health, offline and colors.gray or healthColor(health))
 
         local reason = tostring(module.reason or "")
         if reason == "" then reason = offline and ("NETWORK " .. net) or "Toucher pour ouvrir" end
-        writeAt(x, y + 5, reason, colors.lightGray)
+        writeAt(x, y + 6, reason, colors.lightGray)
 
         moduleBounds[#moduleBounds + 1] = {
             x1=x, x2=math.min(width, x + cardWidth - 1),
-            y1=y, y2=y + 5, id=module.id
+            y1=y, y2=y + 6, id=module.id
         }
     end
 end
