@@ -4,6 +4,12 @@ return {
     monitor = nil,
     stopMode = "HIGH", -- STOP logiciel, sans signal redstone externe sur les machines.
 
+    runtime = {
+        activeSeconds = 1,
+        idleSeconds = 15,
+        sleepSeconds = 600,
+    },
+
     lines = {
         { id = "LINE 1", pump = "electricPump_2", separator = "electrolyticSeparator_2" },
         { id = "LINE 2", pump = "electricPump_1", separator = "electrolyticSeparator_0" },
