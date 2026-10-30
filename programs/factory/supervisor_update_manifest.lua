@@ -1,5 +1,5 @@
 return {
-    version = "0.5.3",
+    version = "0.6.0",
 
     files = {
         {
@@ -13,6 +13,10 @@ return {
         {
             remote = "programs/factory/biofuel.lua",
             localPath = "/programs/factory/biofuel.lua",
+        },
+        {
+            remote = "programs/factory/ethene.lua",
+            localPath = "/programs/factory/ethene.lua",
         },
         {
             remote = "programs/factory/lib/status_bus.lua",
