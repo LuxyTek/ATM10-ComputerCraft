@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.4.1"
+local PROGRAM_VERSION = "0.4.2"
 local args = { ... }
 local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_biofuel.lua"
@@ -369,6 +369,12 @@ local function buildModuleStatus(data)
             health == "FAULT" and "FAULT"
             or (operatingMode == "AUTO" and autoState.hold and "SLEEP")
             or (state == "RUN" and "ACTIVE" or "IDLE"),
+        runtime = {
+            sleepSeconds = config.runtime.sleepSeconds,
+            idleSeconds = config.runtime.idleSeconds,
+            activeSeconds = config.runtime.activeSeconds,
+            lastPoll = runtimeState.lastPoll,
+        },
         reason = operatingMode == "AUTO"
             and autoState.reason
             or (data.crusherState == "RUN" and "MANUAL RUN"
