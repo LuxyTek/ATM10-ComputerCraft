@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.2.0"
+local PROGRAM_VERSION = "0.3.0"
 local args = { ... }
 local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_biofuel.lua"
@@ -14,6 +14,15 @@ local defaults = {
     inputBarrel = "sophisticatedstorage:barrel_0",
     crusher = "ultimateCrushingFactory_0",
     outputBarrel = "sophisticatedstorage:barrel_1",
+    stopMode = "HIGH",
+
+    auto = {
+        -- L'AUTO reste disponible mais ne peut pas determiner "plein"
+        -- tant que targetItems n'est pas renseigne.
+        targetItems = nil,
+        resumeItems = nil,
+        checkSeconds = 2,
+    },
 
     status = {
         publishSeconds = 2,
@@ -75,6 +84,13 @@ local updateMessage = nil
 local updateMessageUntil = 0
 local updateInProgress = false
 local dataCache = nil
+
+local operatingMode = "MANUAL"
+local autoState = {
+    hold = false,
+    reason = "MANUAL",
+    lastTick = 0,
+}
 
 local function safeCall(device, method, ...)
     if not device or type(device[method]) ~= "function" then return nil end
@@ -230,6 +246,71 @@ local function collectData()
     }
 end
 
+local function setCrusherMode(targetMode)
+    if not peripheral.isPresent(config.crusher) then
+        return false, "CRUSHER ABSENT"
+    end
+
+    local crusher = peripheral.wrap(config.crusher)
+    if not crusher or type(crusher.setRedstoneMode) ~= "function" then
+        return false, "CRUSHER NON CONTROLABLE"
+    end
+
+    local ok, err = pcall(crusher.setRedstoneMode, targetMode)
+    if not ok then return false, tostring(err) end
+    return true, targetMode
+end
+
+local function autoConfigured()
+    return type(config.auto.targetItems) == "number" and config.auto.targetItems > 0
+end
+
+local function resumeTarget()
+    if type(config.auto.resumeItems) == "number" and config.auto.resumeItems >= 0 then
+        return math.min(config.auto.resumeItems, config.auto.targetItems)
+    end
+    return math.floor(config.auto.targetItems * 0.80)
+end
+
+local function applyAuto(data)
+    if operatingMode ~= "AUTO" then return end
+
+    if not autoConfigured() then
+        autoState.reason = "AUTO WAIT TARGET"
+        return
+    end
+
+    local outputCount = tonumber(data.output.count) or 0
+    local target = config.auto.targetItems
+    local resume = resumeTarget()
+
+    if autoState.hold then
+        if outputCount <= resume then
+            autoState.hold = false
+        else
+            autoState.reason = ("BUFFER HOLD %d/%d"):format(outputCount, target)
+            if data.crusherState == "RUN" then pcall(setCrusherMode, config.stopMode) end
+            return
+        end
+    end
+
+    if outputCount >= target then
+        autoState.hold = true
+        autoState.reason = ("BUFFER FULL %d/%d"):format(outputCount, target)
+        pcall(setCrusherMode, config.stopMode)
+        return
+    end
+
+    if (tonumber(data.input.count) or 0) <= 0 then
+        autoState.reason = "INPUT EMPTY"
+        pcall(setCrusherMode, config.stopMode)
+        return
+    end
+
+    autoState.reason = ("PRODUCTION %d/%d"):format(outputCount, target)
+    if data.crusherState ~= "RUN" then pcall(setCrusherMode, "DISABLED") end
+end
+
 local function ratio(value, maximum)
     if type(value) ~= "number" or type(maximum) ~= "number" or maximum <= 0 then
         return nil
@@ -264,13 +345,31 @@ local function buildModuleStatus(data)
         type = config.status.type,
         version = PROGRAM_VERSION,
 
-        mode = "MANUAL",
+        mode = operatingMode,
         state = state,
         health = health,
-        reason = inputText .. " -> " .. outputText,
+        runtimeState =
+            health == "FAULT" and "FAULT"
+            or (operatingMode == "AUTO" and autoState.hold and "IDLE")
+            or (state == "RUN" and "ACTIVE" or "IDLE"),
+        reason = operatingMode == "AUTO" and autoState.reason or (inputText .. " -> " .. outputText),
 
         metrics = {
             energy = data.energyFill,
+        },
+
+        ui = {
+            inputCount = data.input.count,
+            inputItem = data.input.itemName,
+            outputCount = data.output.count,
+            crusherState = data.crusherState,
+            energy = data.energy,
+            maxEnergy = data.maxEnergy,
+            energyFill = data.energyFill,
+            energyUsage = data.energyUsage,
+            targetItems = config.auto.targetItems,
+            resumeItems = autoConfigured() and resumeTarget() or nil,
+            autoConfigured = autoConfigured(),
         },
 
         details = {
@@ -519,8 +618,47 @@ local function dataLoop()
     end
 end
 
+local function supervisorControlLoop()
+    while true do
+        local _, action, targetMode = os.pullEvent("factory_biofuel_control")
+
+        if action == "toggle_mode" then
+            if operatingMode == "AUTO" then
+                operatingMode = "MANUAL"
+                autoState.hold = false
+                autoState.reason = "MANUAL"
+            else
+                operatingMode = "AUTO"
+                autoState.hold = false
+                autoState.reason = autoConfigured() and "AUTO INIT" or "AUTO WAIT TARGET"
+            end
+        elseif action == "crusher" and operatingMode == "MANUAL" then
+            pcall(setCrusherMode, targetMode)
+        end
+
+        os.queueEvent("factory_biofuel_refresh")
+    end
+end
+
+local function autoLoop()
+    while true do
+        sleep(config.auto.checkSeconds)
+
+        if operatingMode == "AUTO" and dataCache then
+            local ok = pcall(applyAuto, dataCache)
+            if ok then
+                local refreshOK, fresh = pcall(collectData)
+                if refreshOK then dataCache = fresh end
+            else
+                autoState.reason = "AUTO FAULT"
+            end
+            os.queueEvent("factory_biofuel_refresh")
+        end
+    end
+end
+
 if HEADLESS then
-    parallel.waitForAny(dataLoop, statusLoop)
+    parallel.waitForAny(dataLoop, statusLoop, supervisorControlLoop, autoLoop)
 else
     parallel.waitForAny(uiLoop, dataLoop, statusLoop)
 end
