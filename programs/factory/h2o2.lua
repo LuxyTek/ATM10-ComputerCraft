@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.9.3"
+local PROGRAM_VERSION = "0.9.4"
 local args = { ... }
 local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
@@ -154,6 +154,8 @@ local runtimeState = {
 local overflowResetPending = true
 local separatorOutputMap = {}
 local separatorDefaultMap = {}
+local chemicalTankRoleCache = {}
+local fluidTankRoleCache = {}
 
 local function safeCall(device, method, ...)
     if not device or type(device[method]) ~= "function" then return nil end
@@ -211,7 +213,16 @@ local function classify()
 
         elseif pType:find("fluidtank", 1, true) then
             local stored = safeCall(device, "getStored")
-            if type(stored) == "table" and stored.name == "minecraft:water" then
+            local fluid = type(stored) == "table" and stored.name or nil
+
+            if fluid == "minecraft:water" then
+                fluidTankRoleCache[name] = "water"
+            end
+
+            -- A Mekanism tank can report no stored fluid when completely empty.
+            -- Keep its last known role so an empty buffer does not disappear
+            -- from supervision and create a false CRITICAL PERIPHERAL MISSING.
+            if fluidTankRoleCache[name] == "water" then
                 table.insert(found.waterTanks, { name = name, dev = device })
             end
 
@@ -220,8 +231,19 @@ local function classify()
             local chemical = type(stored) == "table" and stored.name or nil
 
             if chemical == "mekanism:hydrogen" then
-                table.insert(found.hydrogenTanks, { name = name, dev = device })
+                chemicalTankRoleCache[name] = "hydrogen"
             elseif chemical == "mekanism:oxygen" then
+                chemicalTankRoleCache[name] = "oxygen"
+            end
+
+            -- Empty Chemical Tanks may temporarily lose their chemical name.
+            -- Use the last observed role while the peripheral itself remains
+            -- present on the CC network. A truly disconnected tank is still
+            -- absent from peripheral.getNames() and therefore remains a FAULT.
+            local role = chemicalTankRoleCache[name]
+            if role == "hydrogen" then
+                table.insert(found.hydrogenTanks, { name = name, dev = device })
+            elseif role == "oxygen" then
                 table.insert(found.oxygenTanks, { name = name, dev = device })
             end
         end
