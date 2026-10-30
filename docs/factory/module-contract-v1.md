@@ -119,3 +119,31 @@ Cette vue sert de cartographie operationnelle des cellules Factory :
 - le Dashboard central reste en lecture seule dans le contrat v1.
 
 Le pilotage distant n'est volontairement pas ajoute a cette version. Les commandes restent locales a chaque controleur de module afin de valider d'abord l'ergonomie, la supervision et le mapping avant d'introduire un futur protocole de commandes et d'acquittements.
+
+
+## Separation des IHM
+
+A partir du Dashboard V0.3.1, deux IHM ont des roles distincts.
+
+### Factory Dashboard
+
+Le Dashboard est un deport de supervision destine a la base.
+
+Il affiche uniquement la synthese des modules :
+- module ;
+- etat reseau ;
+- mode ;
+- state ;
+- health ;
+- raison courante.
+
+Il ne permet pas d'ouvrir un module et ne porte aucune commande distante.
+
+### Factory Supervisor
+
+Le Supervisor est l'IHM locale de l'usine.
+
+Sa page principale cartographie les modules detectes sur `factory.status.v1`.
+Un toucher sur un module ouvre sa page de supervision complete, alimentee par `details`, `metrics`, les lignes actives et les alarmes publiees.
+
+La V0.1.0 du Supervisor reste en lecture seule. Le controle distant fera l'objet d'un protocole separe lorsque l'ergonomie et le contrat de supervision seront valides.
