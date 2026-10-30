@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.1.0"
+local PROGRAM_VERSION = "0.1.1"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 
 local defaults = {
@@ -92,7 +92,6 @@ local autoState = {
     reason = "AUTO INIT",
 }
 
-local extractionSupport = nil
 
 local function safeCall(device, method, ...)
     if not device or type(device[method]) ~= "function" then return nil end
@@ -316,46 +315,6 @@ local function setAllMode(targetMode)
     return ok
 end
 
-local function tryWasteExtraction(data)
-    if not data.waste.present then return end
-    local waste = peripheral.wrap(config.wasteBarrel)
-    if not waste or type(waste.pullItems) ~= "function" then
-        extractionSupport = false
-        return
-    end
-
-    local anySubstrate = false
-    local anyMoved = false
-    local hadCompatibleCall = false
-
-    for _, line in ipairs(data.lines) do
-        if line.substrateCount > 0 then
-            anySubstrate = true
-
-            for slot=1,10 do
-                local ok, moved = pcall(waste.pullItems, line.prc, slot, line.substrateCount)
-                if ok then
-                    hadCompatibleCall = true
-                    if type(moved) == "number" and moved > 0 then
-                        anyMoved = true
-                        break
-                    end
-                end
-            end
-        end
-    end
-
-    if anyMoved then
-        extractionSupport = true
-    elseif anySubstrate and not hadCompatibleCall then
-        extractionSupport = false
-    elseif anySubstrate and extractionSupport == nil then
-        -- Calls were accepted but no matching transferable slot was found.
-        -- Keep UNKNOWN: Mekanism may expose the output item without generic slots.
-        extractionSupport = nil
-    end
-end
-
 local function updateWaterHolds(data)
     for _, line in ipairs(data.lines) do
         local fill = line.water.fill or 0
@@ -386,7 +345,6 @@ local function applyAuto(data)
 
     autoState.sleepHold = false
     updateWaterHolds(data)
-    tryWasteExtraction(data)
 
     if not data.online then
         autoState.hold = false
@@ -443,9 +401,9 @@ local function applyAuto(data)
     end
 
     local substrateTotal, substrateMax = countSubstrate(data)
-    if extractionSupport == false and substrateMax >= config.auto.substrateStop then
+    if substrateMax >= config.auto.substrateStop then
         autoState.targetLines = 0
-        autoState.reason = "HOLD SUBSTRATE FULL"
+        autoState.reason = "HOLD SUBSTRATE OUTPUT"
         setAllMode(config.stopMode)
         return
     end
@@ -474,8 +432,8 @@ local function applyAuto(data)
 
     if running == 0 then
         autoState.reason = "HOLD WATER"
-    elseif extractionSupport == false and substrateTotal > 0 then
-        autoState.reason = ("PRODUCTION %d/2 | SUBSTRATE MANUAL"):format(running)
+    elseif substrateMax >= config.auto.substrateWarn then
+        autoState.reason = ("PRODUCTION %d/2 | SUBSTRATE HIGH"):format(running)
     else
         autoState.reason = ("PRODUCTION %d/2"):format(running)
     end
@@ -502,7 +460,7 @@ local function healthState(data)
     if not data or not data.online then return "FAULT" end
 
     local _, substrateMax = countSubstrate(data)
-    if extractionSupport == false or substrateMax >= config.auto.substrateWarn then
+    if substrateMax >= config.auto.substrateWarn then
         return "WARN"
     end
 
@@ -579,7 +537,7 @@ local function buildModuleStatus(data)
 
             wasteCount=data.waste.count,
             substrateTotal=substrateTotal,
-            extractionSupport=extractionSupport,
+            outputPath="QE",
 
             targetLines=autoState.targetLines,
             lines=lines,
@@ -592,7 +550,7 @@ local function buildModuleStatus(data)
             {label="SUBSTRATE", value=tostring(substrateTotal)},
         },
 
-        alarms=health == "WARN" and {"SUBSTRATE EXTRACTION A VERIFIER"} or {},
+        alarms=health == "WARN" and {"SUBSTRATE OUTPUT HIGH"} or {},
     }
 end
 
