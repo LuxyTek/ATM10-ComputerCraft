@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.8.1"
+local PROGRAM_VERSION = "0.8.0"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -321,11 +321,7 @@ end
 local function flowPercent(value)
     if type(value) ~= "number" then return "N/A" end
     value = math.max(0, math.min(1, value))
-    local pct = value * 100
-    if pct > 0 and pct < 1 then
-        return ("%.1f%%"):format(pct)
-    end
-    return ("%.0f%%"):format(pct)
+    return ("%.0f%%"):format(value * 100)
 end
 
 local function flowColor(module, now, fill, redAt, warnAt)
