@@ -798,7 +798,7 @@ local function renderBiofuel(now, module)
         writeAt(5,22,"TARGET: A RENSEIGNER",colors.orange)
     end
 
-    local modeY=math.max(25,height-6)
+    local modeY=math.max(24,height-6)
     writeAt(3,modeY,"MODE :",colors.lightGray)
     writeAt(10,modeY,mode,modeColor(mode))
     local modeLabel=mode=="AUTO" and "[ MANUAL ]" or "[ AUTO ]"
@@ -881,6 +881,7 @@ local function renderEthene(now, module)
             local kind=tostring(machine.kind or "?")
             local kindColor=kind=="PUMP" and colors.lightBlue or colors.cyan
             local state=tostring(machine.state or "?")
+            if kind=="CONDENS" and machine.hold then state="HOLD" end
 
             writeAt(2,y,kind,kindColor)
             writeAt(8,y,shortName(machine.name,math.max(12,width-42)),colors.white)
@@ -1032,7 +1033,7 @@ local function renderEthene(now, module)
         y=y+2
     end
 
-    local modeY=math.max(24,height-6)
+    local modeY=math.max(25,height-6)
     writeAt(3,modeY,"MODE :",colors.lightGray)
     writeAt(10,modeY,mode,modeColor(mode))
     if mode=="AUTO" then
