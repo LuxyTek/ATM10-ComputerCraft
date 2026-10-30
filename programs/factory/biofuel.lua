@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.4.0"
+local PROGRAM_VERSION = "0.4.1"
 local args = { ... }
 local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_biofuel.lua"
@@ -716,12 +716,17 @@ local function autoLoop()
         os.pullEvent("factory_biofuel_auto_tick")
 
         if operatingMode == "AUTO" and dataCache then
+            local wasHold = autoState.hold
             local ok = pcall(applyAuto, dataCache)
             if ok then
                 local refreshOK, fresh = pcall(collectData)
                 if refreshOK then dataCache = fresh end
             else
                 autoState.reason = "AUTO FAULT"
+            end
+
+            if wasHold and not autoState.hold then
+                os.queueEvent("factory_module_wake", "biofuel", "AUTO_RESUME")
             end
 
             publishImmediateStatus()
