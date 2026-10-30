@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.5.1"
+local PROGRAM_VERSION = "0.5.2"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -178,6 +178,25 @@ local function runtimeState(module, offline)
     if state == "STOP" then return "IDLE", colors.orange end
 
     return "UNKNOWN", colors.gray
+end
+
+local function runtimeDetailText(module)
+    local state = tostring(module.runtimeState or "")
+    local rt = type(module.runtime) == "table" and module.runtime or {}
+
+    if state == "SLEEP" then
+        local seconds = tonumber(rt.sleepSeconds) or 600
+        local minutes = math.floor(seconds / 60 + 0.5)
+        return ("NEXT CHECK : ~%d min"):format(math.max(1, minutes))
+    elseif state == "IDLE" then
+        local seconds = tonumber(rt.idleSeconds) or 15
+        return ("POLL : ~%d s"):format(math.max(1, math.floor(seconds + 0.5)))
+    elseif state == "ACTIVE" then
+        local seconds = tonumber(rt.activeSeconds) or 1
+        return ("POLL : ~%d s"):format(math.max(1, math.floor(seconds + 0.5)))
+    end
+
+    return nil
 end
 
 local function sortedModules()
@@ -468,16 +487,21 @@ local function renderH2O2(now, module)
         module.health == "OK" and colors.lime or healthColor(module.health))
     centered(6, "PROCESS : " .. tostring(module.state or "?"), stateColor(module.state))
 
-    local metrics = type(module.metrics) == "table" and module.metrics or {}
-    drawH2O2Bar(8,"WATER",metrics.water,colors.blue)
-    drawH2O2Bar(10,"HYDROGEN",metrics.hydrogen,colors.lightBlue)
-    drawH2O2Bar(12,"OXYGEN",metrics.oxygen,colors.cyan)
+    local runtime, runtimeColor = runtimeState(module, false)
+    writeAt(2,7,"RUNTIME : "..runtime,runtimeColor)
+    local runtimeDetail = runtimeDetailText(module)
+    if runtimeDetail then writeAt(math.max(24,width-24),7,runtimeDetail,colors.gray) end
 
-    writeAt(2,14,("Separators : %s actifs | %s detectes"):format(
+    local metrics = type(module.metrics) == "table" and module.metrics or {}
+    drawH2O2Bar(9,"WATER",metrics.water,colors.blue)
+    drawH2O2Bar(11,"HYDROGEN",metrics.hydrogen,colors.lightBlue)
+    drawH2O2Bar(13,"OXYGEN",metrics.oxygen,colors.cyan)
+
+    writeAt(2,15,("Separators : %s actifs | %s detectes"):format(
         tostring(ui.separatorRunning or "?"), tostring(ui.separatorResponding or "?")),colors.lightGray)
-    writeAt(2,15,"Usage      : " .. compact(ui.usage," FE/t"),colors.white)
+    writeAt(2,16,"Usage      : " .. compact(ui.usage," FE/t"),colors.white)
     if type(ui.maxEnergy) == "number" and ui.maxEnergy > 0 then
-        writeAt(2,16,("Sep energy : %s / %s"):format(compact(ui.energy," FE"),compact(ui.maxEnergy," FE")),colors.white)
+        writeAt(2,17,("Sep energy : %s / %s"):format(compact(ui.energy," FE"),compact(ui.maxEnergy," FE")),colors.white)
     end
 
     local modeY=math.max(20,height-9)
@@ -552,39 +576,44 @@ local function renderBiofuel(now, module)
     local processState=tostring(module.state or "IDLE")
     centered(5,"PROCESS : "..processState,stateColor(processState))
 
-    writeAt(3,7,"INPUT BUFFER",colors.yellow)
-    writeAt(5,8,tostring(ui.inputItem or "EMPTY"):gsub("^.-:",""):gsub("_"," "):upper(),colors.white)
-    writeAt(5,9,("COUNT : %s / %s  (%s)"):format(
+    local runtime, runtimeColor = runtimeState(module, false)
+    writeAt(3,6,"RUNTIME : "..runtime,runtimeColor)
+    local runtimeDetail = runtimeDetailText(module)
+    if runtimeDetail then writeAt(math.max(24,width-24),6,runtimeDetail,colors.gray) end
+
+    writeAt(3,8,"INPUT BUFFER",colors.yellow)
+    writeAt(5,9,tostring(ui.inputItem or "EMPTY"):gsub("^.-:",""):gsub("_"," "):upper(),colors.white)
+    writeAt(5,10,("COUNT : %s / %s  (%s)"):format(
         tostring(ui.inputCount or 0),
         tostring(ui.inputCapacity or "?"),
         type(ui.inputFill)=="number" and string.format("%.1f%%",ui.inputFill*100) or "N/A"
     ),colors.lightGray)
 
-    writeAt(3,12,"CRUSHING FACTORY",colors.cyan)
+    writeAt(3,13,"CRUSHING FACTORY",colors.cyan)
     local crusherState=tostring(ui.crusherState or "UNKNOWN")
-    writeAt(5,13,"STATE  : "..crusherState,stateColor(crusherState))
+    writeAt(5,14,"STATE  : "..crusherState,stateColor(crusherState))
     local energyText="ENERGY : N/A"
     if type(ui.energy)=="number" and type(ui.maxEnergy)=="number" then
         energyText=("ENERGY : %s / %s"):format(compact(ui.energy," FE"),compact(ui.maxEnergy," FE"))
     elseif type(ui.energyFill)=="number" then
         energyText=("ENERGY : %.1f%%"):format(ui.energyFill*100)
     end
-    writeAt(5,14,energyText,colors.lightGray)
-    writeAt(5,15,"USAGE  : "..compact(ui.energyUsage," FE/t"),colors.lightGray)
+    writeAt(5,15,energyText,colors.lightGray)
+    writeAt(5,16,"USAGE  : "..compact(ui.energyUsage," FE/t"),colors.lightGray)
 
-    writeAt(3,18,"BIOFUEL BUFFER",colors.green)
-    writeAt(5,19,"BIO FUEL",colors.white)
-    writeAt(5,20,("COUNT : %s / %s  (%s)"):format(
+    writeAt(3,19,"BIOFUEL BUFFER",colors.green)
+    writeAt(5,20,"BIO FUEL",colors.white)
+    writeAt(5,21,("COUNT : %s / %s  (%s)"):format(
         tostring(ui.outputCount or 0),
         tostring(ui.outputCapacity or "?"),
         type(ui.outputFill)=="number" and string.format("%.1f%%",ui.outputFill*100) or "N/A"
     ),colors.lightGray)
 
     if ui.autoConfigured then
-        writeAt(5,21,("TARGET: %s | RESUME: %s"):format(
+        writeAt(5,22,("TARGET: %s | RESUME: %s"):format(
             tostring(ui.targetItems or "?"),tostring(ui.resumeItems or "?")),colors.gray)
     else
-        writeAt(5,21,"TARGET: A RENSEIGNER",colors.orange)
+        writeAt(5,22,"TARGET: A RENSEIGNER",colors.orange)
     end
 
     local modeY=math.max(24,height-6)
