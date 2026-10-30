@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.2.0"
+local PROGRAM_VERSION = "0.2.1"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 
 local defaults = {
@@ -6,7 +6,6 @@ local defaults = {
 
     biofuelBarrel = "sophisticatedstorage:barrel_1",
     biofuelCapacity = 270336,
-    wasteBarrel = "sophisticatedstorage:barrel_2",
     etheneTank = "ultimateMaxChemicalTank_2",
 
     lines = {
@@ -282,7 +281,6 @@ local function collectData()
     end
 
     local biofuel = summarizeInventory(config.biofuelBarrel)
-    local waste = summarizeInventory(config.wasteBarrel)
     local ethene = readChemicalTank(config.etheneTank)
     local hydrogen = findHydrogen()
 
@@ -293,7 +291,6 @@ local function collectData()
     return {
         lines=lines,
         biofuel=biofuel,
-        waste=waste,
         ethene=ethene,
         hydrogen=hydrogen,
         online=criticalPresent,
@@ -577,8 +574,6 @@ local function buildModuleStatus(data)
             biofuelCapacity=config.biofuelCapacity,
             biofuelFill=ratio(data.biofuel.count, config.biofuelCapacity),
 
-            wastePresent=data.waste.present,
-            wasteCount=data.waste.count,
             substrateTotal=substrateTotal,
             outputPath="QE",
 
