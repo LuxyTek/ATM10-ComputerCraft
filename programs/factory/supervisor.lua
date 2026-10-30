@@ -1,8 +1,13 @@
-local PROGRAM_VERSION = "0.1.1"
+local PROGRAM_VERSION = "0.2.0"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 local UPDATE_MANIFEST = "programs/factory/supervisor_update_manifest.lua"
+
+local MODULE_PROGRAMS = {
+    { id = "h2o2", path = "/programs/factory/h2o2.lua" },
+    { id = "biofuel", path = "/programs/factory/biofuel.lua" },
+}
 
 local defaults = {
     refreshSeconds = 1,
@@ -417,16 +422,55 @@ local function validPacket(message)
         and message.id ~= ""
 end
 
-local function networkLoop()
+local function statusLoop()
     while true do
-        local _, sender, message, protocol = os.pullEvent("rednet_message")
-        if protocol == STATUS_PROTOCOL and validPacket(message) then
+        local event, p1, p2, p3 = os.pullEvent()
+
+        local message = nil
+        local sender = nil
+
+        if event == "factory_local_status" then
+            message = p1
+            sender = os.getComputerID()
+        elseif event == "rednet_message" and p3 == STATUS_PROTOCOL then
+            sender = p1
+            message = p2
+        end
+
+        if message and validPacket(message) then
             message.senderId = sender
             message.lastSeen = nowSeconds()
             modules[message.id] = message
             os.queueEvent("factory_supervisor_refresh")
         end
     end
+end
+
+local function runModuleProcess(moduleDef)
+    while true do
+        if fs.exists(moduleDef.path) then
+            local ok = shell.run(moduleDef.path, "--headless")
+            if not ok then
+                updateMessage = "MODULE " .. tostring(moduleDef.id) .. " STOP"
+                updateMessageUntil = nowSeconds() + 8
+                os.queueEvent("factory_supervisor_refresh")
+            end
+        else
+            updateMessage = "MODULE " .. tostring(moduleDef.id) .. " ABSENT"
+            updateMessageUntil = nowSeconds() + 8
+            os.queueEvent("factory_supervisor_refresh")
+        end
+
+        sleep(5)
+    end
+end
+
+local function moduleH2O2Loop()
+    runModuleProcess(MODULE_PROGRAMS[1])
+end
+
+local function moduleBiofuelLoop()
+    runModuleProcess(MODULE_PROGRAMS[2])
 end
 
 local function uiLoop()
@@ -481,4 +525,4 @@ local function refreshLoop()
     end
 end
 
-parallel.waitForAny(networkLoop, uiLoop, refreshLoop)
+parallel.waitForAny(statusLoop, uiLoop, refreshLoop, moduleH2O2Loop, moduleBiofuelLoop)
