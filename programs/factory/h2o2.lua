@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.9.1"
+local PROGRAM_VERSION = "0.9.2"
 local args = { ... }
 local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
@@ -1056,6 +1056,12 @@ local function buildModuleStatus(data)
         state = state,
         health = health,
         runtimeState = computeRuntimeState(data),
+        runtime = {
+            sleepSeconds = config.runtime.sleepSeconds,
+            idleSeconds = config.runtime.idleSeconds,
+            activeSeconds = config.runtime.activeSeconds,
+            lastPoll = runtimeState.lastPoll,
+        },
         reason = moduleStatusReason(data),
 
         activeLines = activeLines,
