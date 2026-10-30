@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.9.0"
+local PROGRAM_VERSION = "0.9.1"
 local args = { ... }
 local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
@@ -1959,6 +1959,7 @@ local function autoLoop()
             if now - autoState.lastTick >= config.auto.checkSeconds then
                 autoState.lastTick = now
 
+                local wasChemicalHold = autoState.chemicalHold
                 local targetLines, reason = decideAutoTarget(dataCache)
                 autoState.targetLines = targetLines
                 autoState.reason = reason
@@ -1977,6 +1978,10 @@ local function autoLoop()
                     if refreshOK then
                         dataCache = freshData
                     end
+                end
+
+                if wasChemicalHold and not autoState.chemicalHold then
+                    os.queueEvent("factory_module_wake", "h2o2", "AUTO_RESUME")
                 end
 
                 os.queueEvent("factory_refresh")
