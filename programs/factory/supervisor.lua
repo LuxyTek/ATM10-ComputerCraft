@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.2.0"
+local PROGRAM_VERSION = "0.3.0"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -80,6 +80,18 @@ local selectedModuleId = nil
 local updateBounds = nil
 local backBounds = nil
 local moduleBounds = {}
+
+local h2o2Page = "overview"
+local h2o2MachinePage = 1
+local h2o2TabOverviewBounds = nil
+local h2o2TabMachinesBounds = nil
+local h2o2ModeBounds = nil
+local h2o2StartBounds = nil
+local h2o2StopBounds = nil
+local h2o2PrevBounds = nil
+local h2o2NextBounds = nil
+local h2o2LineBounds = {}
+local h2o2MachineBounds = {}
 
 local updateConfirmUntil = 0
 local updateInProgress = false
@@ -315,6 +327,202 @@ local function renderMetricList(module, startY, maxY)
     return y
 end
 
+
+local function compact(value, unit)
+    if type(value) ~= "number" then return "--" end
+    local absValue = math.abs(value)
+    if absValue >= 1e9 then return string.format("%.2f G%s", value / 1e9, unit or "") end
+    if absValue >= 1e6 then return string.format("%.2f M%s", value / 1e6, unit or "") end
+    if absValue >= 1e3 then return string.format("%.2f k%s", value / 1e3, unit or "") end
+    return string.format("%.0f%s", value, unit or "")
+end
+
+local function machinePct(value)
+    if type(value) ~= "number" then return "N/A" end
+    return string.format("%.1f%%", math.max(0, math.min(1, value)) * 100)
+end
+
+local function shortName(name, maxLen)
+    name = tostring(name or "")
+    if #name <= maxLen then return name end
+    return name:sub(1, math.max(1, maxLen - 3)) .. "..."
+end
+
+local function drawH2O2Bar(y, label, fill, color)
+    fill = type(fill) == "number" and math.max(0, math.min(1, fill)) or 0
+    local pctText = string.format("%5.1f%%", fill * 100)
+    writeAt(2, y, label, colors.white)
+    local barX = 14
+    local barWidth = math.max(8, width - 28)
+    local filled = math.floor(barWidth * fill + 0.5)
+    writeAt(barX, y, string.rep(" ", barWidth), colors.white, colors.gray)
+    if filled > 0 then writeAt(barX, y, string.rep(" ", filled), colors.black, color) end
+    writeAt(barX + barWidth + 1, y, pctText, colors.white)
+end
+
+local function renderH2O2(now, module)
+    h2o2TabOverviewBounds = nil
+    h2o2TabMachinesBounds = nil
+    h2o2ModeBounds = nil
+    h2o2StartBounds = nil
+    h2o2StopBounds = nil
+    h2o2PrevBounds = nil
+    h2o2NextBounds = nil
+    h2o2LineBounds = {}
+    h2o2MachineBounds = {}
+
+    local backLabel = "[ < MODULES ]"
+    writeAt(2, 2, backLabel, colors.white, colors.gray)
+    backBounds = {x1=2,x2=2+#backLabel-1,y1=2,y2=2}
+
+    centered(1, "FACTORY H2/O2  v" .. tostring(module.version or "?"), colors.cyan)
+
+    local overviewLabel = "[ OVERVIEW ]"
+    local machinesLabel = "[ MACHINES ]"
+    writeAt(18, 3, overviewLabel, colors.white, h2o2Page == "overview" and colors.blue or colors.gray)
+    h2o2TabOverviewBounds = {x1=18,x2=18+#overviewLabel-1,y1=3,y2=3}
+    local mx = 18 + #overviewLabel + 2
+    writeAt(mx, 3, machinesLabel, colors.white, h2o2Page == "machines" and colors.blue or colors.gray)
+    h2o2TabMachinesBounds = {x1=mx,x2=mx+#machinesLabel-1,y1=3,y2=3}
+
+    local ui = type(module.ui) == "table" and module.ui or {}
+    local mode = tostring(module.mode or "MANUAL")
+
+    if h2o2Page == "machines" then
+        centered(5, "CONTROLE MACHINES", colors.cyan)
+        local machines = type(ui.machines) == "table" and ui.machines or {}
+        local firstY = 7
+        local rowsPerMachine = 3
+        local machinesPerPage = math.max(1, math.floor((height - firstY - 4 + 1) / rowsPerMachine))
+        local pageCount = math.max(1, math.ceil(#machines / machinesPerPage))
+        if h2o2MachinePage > pageCount then h2o2MachinePage = pageCount end
+        local startIndex = (h2o2MachinePage - 1) * machinesPerPage + 1
+        local endIndex = math.min(#machines, startIndex + machinesPerPage - 1)
+        local y = firstY
+
+        if #machines == 0 then centered(8, "AUCUNE MACHINE", colors.orange) end
+
+        for i=startIndex,endIndex do
+            local machine = machines[i]
+            local kindColor = machine.kind == "PUMP" and colors.lightBlue or colors.cyan
+            local sColor = stateColor(machine.state)
+            writeAt(2,y,tostring(machine.kind or "?"),kindColor)
+            writeAt(8,y,shortName(machine.name,math.max(12,width-42)),colors.white)
+            writeAt(math.max(30,width-26),y,tostring(machine.lineId or "UNASSIGNED"),colors.yellow)
+            writeAt(math.max(42,width-14),y,tostring(machine.state or "?"),sColor)
+
+            if mode == "AUTO" then
+                writeAt(math.max(50,width-8),y,"[ AUTO ]",colors.lightGray,colors.gray)
+            else
+                local running = machine.state == "RUN"
+                local label = running and "[ STOP ]" or "[ START ]"
+                local bx = width - #label - 1
+                writeAt(bx,y,label,running and colors.white or colors.black,running and colors.red or colors.lime)
+                h2o2MachineBounds[#h2o2MachineBounds+1] = {
+                    x1=bx,x2=bx+#label-1,y1=y,y2=y,
+                    name=machine.name,targetMode=running and "HIGH" or "DISABLED"
+                }
+            end
+
+            if machine.kind == "PUMP" then
+                writeAt(8,y+1,"FLUID " .. machinePct(machine.fluidFill),colors.lightGray)
+            else
+                writeAt(8,y+1,("WATER %s   H2 %s   O2 %s"):format(
+                    machinePct(machine.waterFill),
+                    machinePct(machine.hydrogenFill),
+                    machinePct(machine.oxygenFill)
+                ),colors.lightGray)
+                writeAt(8,y+2,("LEFT %s   RIGHT %s"):format(
+                    tostring(machine.leftDumpMode or "N/A"),
+                    tostring(machine.rightDumpMode or "N/A")
+                ),colors.gray)
+            end
+            y=y+rowsPerMachine
+        end
+
+        local navY=height-2
+        if h2o2MachinePage > 1 then
+            writeAt(2,navY,"[ < ]",colors.white,colors.gray)
+            h2o2PrevBounds={x1=2,x2=6,y1=navY,y2=navY}
+        end
+        centered(navY,("PAGE %d/%d"):format(h2o2MachinePage,pageCount),colors.lightGray)
+        if h2o2MachinePage < pageCount then
+            local label="[ > ]"
+            local bx=width-#label-1
+            writeAt(bx,navY,label,colors.white,colors.gray)
+            h2o2NextBounds={x1=bx,x2=bx+#label-1,y1=navY,y2=navY}
+        end
+        return
+    end
+
+    centered(5, module.health == "OK" and "SYSTEME ONLINE" or "SYSTEME DEGRADE",
+        module.health == "OK" and colors.lime or healthColor(module.health))
+    centered(6, "PROCESS : " .. tostring(module.state or "?"), stateColor(module.state))
+
+    local metrics = type(module.metrics) == "table" and module.metrics or {}
+    drawH2O2Bar(8,"WATER",metrics.water,colors.blue)
+    drawH2O2Bar(10,"HYDROGEN",metrics.hydrogen,colors.lightBlue)
+    drawH2O2Bar(12,"OXYGEN",metrics.oxygen,colors.cyan)
+
+    writeAt(2,14,("Separators : %s actifs | %s detectes"):format(
+        tostring(ui.separatorRunning or "?"), tostring(ui.separatorResponding or "?")),colors.lightGray)
+    writeAt(2,15,"Usage      : " .. compact(ui.usage," FE/t"),colors.white)
+    if type(ui.maxEnergy) == "number" and ui.maxEnergy > 0 then
+        writeAt(2,16,("Sep energy : %s / %s"):format(compact(ui.energy," FE"),compact(ui.maxEnergy," FE")),colors.white)
+    end
+
+    local modeY=math.max(20,height-9)
+    writeAt(2,modeY,"MODE :",colors.lightGray)
+    writeAt(9,modeY,mode,modeColor(mode))
+    if mode == "AUTO" then
+        writeAt(16,modeY,("TARGET %s/%s"):format(tostring(ui.targetLines or 0),tostring(module.totalLines or 0)),colors.white)
+    end
+    local modeLabel = mode == "AUTO" and "[ MANUAL ]" or "[ AUTO ]"
+    local modeX=width-#modeLabel-1
+    writeAt(modeX,modeY,modeLabel,colors.white,mode=="AUTO" and colors.blue or colors.lime)
+    h2o2ModeBounds={x1=modeX,x2=modeX+#modeLabel-1,y1=modeY,y2=modeY}
+
+    local titleY=modeY+2
+    writeAt(2,titleY,"LINES",colors.cyan)
+    if module.reason then writeAt(10,titleY,tostring(module.reason),colors.lightGray) end
+
+    local lines=type(ui.lines)=="table" and ui.lines or {}
+    local y=titleY+1
+    for _,line in ipairs(lines) do
+        writeAt(4,y,tostring(line.id),colors.white)
+        writeAt(16,y,tostring(line.state),stateColor(line.state))
+        if mode=="AUTO" then
+            writeAt(28,y,"[ AUTO ]",colors.lightGray,colors.gray)
+        else
+            local running=line.state=="RUN"
+            local label=running and "[ STOP ]" or "[ START ]"
+            writeAt(28,y,label,running and colors.white or colors.black,running and colors.red or colors.lime)
+            h2o2LineBounds[#h2o2LineBounds+1]={
+                x1=28,x2=28+#label-1,y1=y,y2=y,
+                id=line.id,targetMode=running and "HIGH" or "DISABLED"
+            }
+        end
+        y=y+1
+    end
+
+    local controlsY=math.max(19,height-2)
+    if mode=="AUTO" then
+        writeAt(2,controlsY,"AUTO ACTIF - CONTROLES MANUELS VERROUILLES",colors.lightGray)
+    else
+        local startLabel="[ START ALL ]"
+        local stopLabel="[ STOP ALL ]"
+        writeAt(2,controlsY,startLabel,colors.black,colors.lime)
+        h2o2StartBounds={x1=2,x2=2+#startLabel-1,y1=controlsY,y2=controlsY}
+        local sx=2+#startLabel+2
+        writeAt(sx,controlsY,stopLabel,colors.white,colors.red)
+        h2o2StopBounds={x1=sx,x2=sx+#stopLabel-1,y1=controlsY,y2=controlsY}
+    end
+end
+
+local function sendH2O2Control(scope,target,targetMode,label)
+    os.queueEvent("factory_control_request",scope,target or "",targetMode,label or "SUPERVISOR")
+end
+
 local function renderDetail(now)
     moduleBounds = {}
 
@@ -395,8 +603,19 @@ render = function()
     updateBounds = nil
     backBounds = nil
     moduleBounds = {}
+    h2o2TabOverviewBounds = nil
+    h2o2TabMachinesBounds = nil
+    h2o2ModeBounds = nil
+    h2o2StartBounds = nil
+    h2o2StopBounds = nil
+    h2o2PrevBounds = nil
+    h2o2NextBounds = nil
+    h2o2LineBounds = {}
+    h2o2MachineBounds = {}
 
-    if currentView == "detail" then
+    if currentView == "detail" and selectedModuleId == "h2o2" and modules.h2o2 then
+        renderH2O2(now, modules.h2o2)
+    elseif currentView == "detail" then
         renderDetail(now)
     else
         renderMap(now, sortedModules())
@@ -489,6 +708,7 @@ local function uiLoop()
             if inside(backBounds, x, y) then
                 currentView = "map"
                 selectedModuleId = nil
+                h2o2Page = "overview"
 
             else
                 local handled = false
@@ -500,6 +720,46 @@ local function uiLoop()
                             currentView = "detail"
                             handled = true
                             break
+                        end
+                    end
+                elseif currentView == "detail" and selectedModuleId == "h2o2" then
+                    if inside(h2o2TabOverviewBounds,x,y) then
+                        h2o2Page="overview"
+                        handled=true
+                    elseif inside(h2o2TabMachinesBounds,x,y) then
+                        h2o2Page="machines"
+                        handled=true
+                    elseif inside(h2o2PrevBounds,x,y) then
+                        h2o2MachinePage=math.max(1,h2o2MachinePage-1)
+                        handled=true
+                    elseif inside(h2o2NextBounds,x,y) then
+                        h2o2MachinePage=h2o2MachinePage+1
+                        handled=true
+                    elseif inside(h2o2ModeBounds,x,y) then
+                        os.queueEvent("factory_h2o2_mode_toggle")
+                        handled=true
+                    elseif inside(h2o2StartBounds,x,y) then
+                        sendH2O2Control("all","","DISABLED","START ALL")
+                        handled=true
+                    elseif inside(h2o2StopBounds,x,y) then
+                        sendH2O2Control("all","","HIGH","STOP ALL")
+                        handled=true
+                    else
+                        for _,button in ipairs(h2o2LineBounds) do
+                            if inside(button,x,y) then
+                                sendH2O2Control("line",button.id,button.targetMode,"LINE "..tostring(button.id))
+                                handled=true
+                                break
+                            end
+                        end
+                        if not handled then
+                            for _,button in ipairs(h2o2MachineBounds) do
+                                if inside(button,x,y) then
+                                    sendH2O2Control("machine",button.name,button.targetMode,"MACHINE")
+                                    handled=true
+                                    break
+                                end
+                            end
                         end
                     end
                 end
