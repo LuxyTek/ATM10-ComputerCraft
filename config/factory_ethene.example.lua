@@ -4,6 +4,8 @@ return {
     biofuelBarrel = "sophisticatedstorage:barrel_1",
     biofuelCapacity = 270336,
     etheneTank = "ultimateMaxChemicalTank_2",
+    condensentrator = "rotaryCondensentrator_0",
+    liquidEtheneTank = "ultimateFluidTank_7",
 
     lines = {
         {
@@ -24,6 +26,9 @@ return {
         etheneStop = 0.95,
         etheneResume = 0.80,
         scaleToTwo = 0.30,
+
+        liquidStop = 0.95,
+        liquidResume = 0.80,
 
         waterStop = 0.10,
         waterResume = 0.40,
