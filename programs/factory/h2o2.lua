@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.8.2"
+local PROGRAM_VERSION = "0.9.0"
 local args = { ... }
 local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
@@ -10,6 +10,12 @@ local defaults = {
     textScale = 0.5,
     monitor = nil,
     stopMode = "HIGH",
+
+    runtime = {
+        activeSeconds = 1,
+        idleSeconds = 15,
+        sleepSeconds = 600,
+    },
 
     -- Mapping logique confirme sur l'installation actuelle.
     -- Il reste dans la configuration et n'est pas deduit des suffixes CC.
@@ -139,6 +145,11 @@ local autoState = {
 }
 
 local dataCache = nil
+local runtimeState = {
+    state = "ACTIVE",
+    wakeReason = "BOOT",
+    lastPoll = 0,
+}
 local overflowResetPending = true
 local separatorOutputMap = {}
 local separatorDefaultMap = {}
@@ -957,6 +968,29 @@ local function moduleStatusReason(data)
     return ("DEMAND %s %.0f%%"):format(demandName, demandFill * 100)
 end
 
+local function computeRuntimeState(data)
+    if not data then return "FAULT" end
+
+    local devices = data.devices or {}
+    if #(devices.separators or {}) == 0
+        or #(devices.pumps or {}) == 0
+        or #(devices.waterTanks or {}) == 0
+        or #(devices.hydrogenTanks or {}) == 0
+        or #(devices.oxygenTanks or {}) == 0 then
+        return "FAULT"
+    end
+
+    if operatingMode == "AUTO" and autoState.chemicalHold then
+        return "SLEEP"
+    end
+
+    for _, line in ipairs(data.lines or {}) do
+        if line.state == "RUN" then return "ACTIVE" end
+    end
+
+    return "IDLE"
+end
+
 local function buildModuleStatus(data)
     local activeLines = 0
     local hasMissing = false
@@ -1021,6 +1055,7 @@ local function buildModuleStatus(data)
         mode = operatingMode,
         state = state,
         health = health,
+        runtimeState = computeRuntimeState(data),
         reason = moduleStatusReason(data),
 
         activeLines = activeLines,
@@ -1975,6 +2010,30 @@ local function statusLoop()
     end
 end
 
+local function waitForNextPoll(seconds)
+    local timer = os.startTimer(math.max(0.1, seconds))
+
+    while true do
+        local event, p1, p2, p3 = os.pullEvent()
+
+        if event == "timer" and p1 == timer then
+            return "TIMER"
+        elseif event == "factory_module_wake" and p1 == "h2o2" then
+            runtimeState.wakeReason = tostring(p2 or "WAKE")
+            return runtimeState.wakeReason
+        end
+    end
+end
+
+local function pollInterval()
+    local state = computeRuntimeState(dataCache)
+    runtimeState.state = state
+
+    if state == "SLEEP" then return config.runtime.sleepSeconds end
+    if state == "IDLE" then return config.runtime.idleSeconds end
+    return config.runtime.activeSeconds
+end
+
 local function dataLoop()
     while true do
         local ok, freshData = pcall(collectData)
@@ -1999,7 +2058,8 @@ local function dataLoop()
             os.queueEvent("factory_refresh")
         end
 
-        sleep(config.refreshSeconds)
+        runtimeState.lastPoll = os.epoch("utc") / 1000
+        waitForNextPoll(pollInterval())
     end
 end
 
