@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.4.0"
+local PROGRAM_VERSION = "0.4.2"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -148,6 +148,8 @@ local function stateColor(state)
     if state == "RUN" then return colors.lime end
     if state == "HOLD" then return colors.orange end
     if state == "STOP" then return colors.red end
+    if state == "ABSENT" then return colors.red end
+    if state == "WARN" or state == "UNKNOWN" then return colors.orange end
     if state == "IDLE" then return colors.lightGray end
     return colors.white
 end
@@ -547,13 +549,16 @@ local function renderBiofuel(now, module)
 
     local ui=type(module.ui)=="table" and module.ui or {}
     local mode=tostring(module.mode or "MANUAL")
+    local processState=tostring(module.state or "IDLE")
+    centered(5,"PROCESS : "..processState,stateColor(processState))
 
     writeAt(3,7,"INPUT BUFFER",colors.yellow)
     writeAt(5,8,tostring(ui.inputItem or "EMPTY"):gsub("^.-:",""):gsub("_"," "):upper(),colors.white)
     writeAt(5,9,"COUNT : "..tostring(ui.inputCount or 0),colors.lightGray)
 
     writeAt(3,12,"CRUSHING FACTORY",colors.cyan)
-    writeAt(5,13,"STATE  : "..tostring(ui.crusherState or "N/A"),stateColor(ui.crusherState))
+    local crusherState=tostring(ui.crusherState or "UNKNOWN")
+    writeAt(5,13,"STATE  : "..crusherState,stateColor(crusherState))
     local energyText="ENERGY : N/A"
     if type(ui.energy)=="number" and type(ui.maxEnergy)=="number" then
         energyText=("ENERGY : %s / %s"):format(compact(ui.energy," FE"),compact(ui.maxEnergy," FE"))
@@ -583,7 +588,12 @@ local function renderBiofuel(now, module)
     biofuelModeBounds={x1=mx,x2=mx+#modeLabel-1,y1=modeY,y2=modeY}
 
     writeAt(3,modeY+2,"STATUS :",colors.gray)
-    writeAt(12,modeY+2,tostring(module.reason or "-"),colors.lightGray)
+    local reason=tostring(module.reason or "-")
+    local reasonColor=colors.lightGray
+    if reason:find("FAULT",1,true) then reasonColor=colors.red
+    elseif reason:find("HOLD",1,true) or reason:find("STOP",1,true) then reasonColor=colors.orange
+    elseif reason:find("PRODUCTION",1,true) or reason:find("RUN",1,true) then reasonColor=colors.lime end
+    writeAt(12,modeY+2,reason,reasonColor)
 
     local controlY=height-2
     if mode=="AUTO" then
