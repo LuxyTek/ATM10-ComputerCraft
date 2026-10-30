@@ -6,6 +6,7 @@ local BASE = ("https://raw.githubusercontent.com/%s/%s/%s/"):format(OWNER, REPO,
 local files = {
     {"programs/factory/biofuel.lua", "/programs/factory/biofuel.lua", true},
     {"programs/factory/lib/updater.lua", "/programs/factory/lib/updater.lua", true},
+    {"programs/factory/lib/status_bus.lua", "/programs/factory/lib/status_bus.lua", true},
     {"programs/factory/biofuel_update_manifest.lua", "/programs/factory/biofuel_update_manifest.lua", true},
     {"config/factory_biofuel.example.lua", "/config/factory_biofuel.lua", false},
     {"startup_factory_biofuel.lua", "/startup.lua", true},
