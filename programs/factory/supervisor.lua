@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.3.0"
+local PROGRAM_VERSION = "0.4.0"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -92,6 +92,10 @@ local h2o2PrevBounds = nil
 local h2o2NextBounds = nil
 local h2o2LineBounds = {}
 local h2o2MachineBounds = {}
+
+local biofuelModeBounds = nil
+local biofuelStartBounds = nil
+local biofuelStopBounds = nil
 
 local updateConfirmUntil = 0
 local updateInProgress = false
@@ -370,6 +374,9 @@ local function renderH2O2(now, module)
     h2o2NextBounds = nil
     h2o2LineBounds = {}
     h2o2MachineBounds = {}
+    biofuelModeBounds = nil
+    biofuelStartBounds = nil
+    biofuelStopBounds = nil
 
     local backLabel = "[ < MODULES ]"
     writeAt(2, 2, backLabel, colors.white, colors.gray)
@@ -523,6 +530,79 @@ local function sendH2O2Control(scope,target,targetMode,label)
     os.queueEvent("factory_control_request",scope,target or "",targetMode,label or "SUPERVISOR")
 end
 
+
+local function renderBiofuel(now, module)
+    biofuelModeBounds = nil
+    biofuelStartBounds = nil
+    biofuelStopBounds = nil
+
+    local backLabel = "[ < MODULES ]"
+    writeAt(2,2,backLabel,colors.white,colors.gray)
+    backBounds={x1=2,x2=2+#backLabel-1,y1=2,y2=2}
+
+    centered(1,"FACTORY BIOFUEL  v"..tostring(module.version or "?"),colors.cyan)
+
+    centered(4,module.health=="OK" and "SYSTEME ONLINE" or "SYSTEME INCOMPLET",
+        module.health=="OK" and colors.lime or healthColor(module.health))
+
+    local ui=type(module.ui)=="table" and module.ui or {}
+    local mode=tostring(module.mode or "MANUAL")
+
+    writeAt(3,7,"INPUT BUFFER",colors.yellow)
+    writeAt(5,8,tostring(ui.inputItem or "EMPTY"):gsub("^.-:",""):gsub("_"," "):upper(),colors.white)
+    writeAt(5,9,"COUNT : "..tostring(ui.inputCount or 0),colors.lightGray)
+
+    writeAt(3,12,"CRUSHING FACTORY",colors.cyan)
+    writeAt(5,13,"STATE  : "..tostring(ui.crusherState or "N/A"),stateColor(ui.crusherState))
+    local energyText="ENERGY : N/A"
+    if type(ui.energy)=="number" and type(ui.maxEnergy)=="number" then
+        energyText=("ENERGY : %s / %s"):format(compact(ui.energy," FE"),compact(ui.maxEnergy," FE"))
+    elseif type(ui.energyFill)=="number" then
+        energyText=("ENERGY : %.1f%%"):format(ui.energyFill*100)
+    end
+    writeAt(5,14,energyText,colors.lightGray)
+    writeAt(5,15,"USAGE  : "..compact(ui.energyUsage," FE/t"),colors.lightGray)
+
+    writeAt(3,18,"BIOFUEL BUFFER",colors.green)
+    writeAt(5,19,"BIO FUEL",colors.white)
+    writeAt(5,20,"COUNT : "..tostring(ui.outputCount or 0),colors.lightGray)
+
+    if ui.autoConfigured then
+        writeAt(5,21,("TARGET: %s | RESUME: %s"):format(
+            tostring(ui.targetItems or "?"),tostring(ui.resumeItems or "?")),colors.gray)
+    else
+        writeAt(5,21,"TARGET: A RENSEIGNER",colors.orange)
+    end
+
+    local modeY=math.max(24,height-6)
+    writeAt(3,modeY,"MODE :",colors.lightGray)
+    writeAt(10,modeY,mode,modeColor(mode))
+    local modeLabel=mode=="AUTO" and "[ MANUAL ]" or "[ AUTO ]"
+    local mx=width-#modeLabel-1
+    writeAt(mx,modeY,modeLabel,colors.white,mode=="AUTO" and colors.blue or colors.lime)
+    biofuelModeBounds={x1=mx,x2=mx+#modeLabel-1,y1=modeY,y2=modeY}
+
+    writeAt(3,modeY+2,"STATUS :",colors.gray)
+    writeAt(12,modeY+2,tostring(module.reason or "-"),colors.lightGray)
+
+    local controlY=height-2
+    if mode=="AUTO" then
+        writeAt(3,controlY,"AUTO ACTIF - CONTROLE MANUEL VERROUILLE",colors.lightGray)
+    else
+        local startLabel="[ START ]"
+        local stopLabel="[ STOP ]"
+        writeAt(3,controlY,startLabel,colors.black,colors.lime)
+        biofuelStartBounds={x1=3,x2=3+#startLabel-1,y1=controlY,y2=controlY}
+        local sx=3+#startLabel+2
+        writeAt(sx,controlY,stopLabel,colors.white,colors.red)
+        biofuelStopBounds={x1=sx,x2=sx+#stopLabel-1,y1=controlY,y2=controlY}
+    end
+end
+
+local function sendBiofuelControl(action,targetMode)
+    os.queueEvent("factory_biofuel_control",action,targetMode)
+end
+
 local function renderDetail(now)
     moduleBounds = {}
 
@@ -615,6 +695,8 @@ render = function()
 
     if currentView == "detail" and selectedModuleId == "h2o2" and modules.h2o2 then
         renderH2O2(now, modules.h2o2)
+    elseif currentView == "detail" and selectedModuleId == "biofuel" and modules.biofuel then
+        renderBiofuel(now, modules.biofuel)
     elseif currentView == "detail" then
         renderDetail(now)
     else
@@ -761,6 +843,17 @@ local function uiLoop()
                                 end
                             end
                         end
+                    end
+                elseif currentView == "detail" and selectedModuleId == "biofuel" then
+                    if inside(biofuelModeBounds,x,y) then
+                        sendBiofuelControl("toggle_mode")
+                        handled=true
+                    elseif inside(biofuelStartBounds,x,y) then
+                        sendBiofuelControl("crusher","DISABLED")
+                        handled=true
+                    elseif inside(biofuelStopBounds,x,y) then
+                        sendBiofuelControl("crusher","HIGH")
+                        handled=true
                     end
                 end
 
