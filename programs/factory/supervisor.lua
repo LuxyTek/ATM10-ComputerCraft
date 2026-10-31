@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.9.4"
+local PROGRAM_VERSION = "0.9.5"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -575,14 +575,21 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
 
         -- H2/O2 -> HDPE : O2 bypasses ETHENE on its own upper route.
         local o2Y = 5
-        local o2StartX = leftX + nodeWidth - 1
 
-        -- Feed O2 into the HDPE node from above instead of through its left
-        -- side. This keeps the RUNTIME/MODE/STATE/HEALTH rows visually clean.
+        -- Anchor O2 on the top edge of H2/O2, then route it across the top
+        -- and down into the top edge of HDPE. This keeps both endpoints
+        -- visually tied to their source/destination modules.
+        local o2SourceX = leftX + math.floor(nodeWidth / 2)
         local o2DropX = rightX + math.floor(nodeWidth / 2)
 
+        writeAt(o2SourceX, h2Y, "^", o2Color)
+
+        for y = o2Y + 1, h2Y - 1 do
+            writeAt(o2SourceX, y, "|", o2Color)
+        end
+
         drawResourceLink(
-            o2StartX,
+            o2SourceX,
             o2DropX,
             o2Y,
             "O2 " .. flowPercent(o2Fill),
