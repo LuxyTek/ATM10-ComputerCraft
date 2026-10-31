@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.1.0"
+local PROGRAM_VERSION = "0.1.1"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 local CONFIG_PATH = "/config/factory_hdpe.lua"
 
@@ -6,6 +6,8 @@ local defaults = {
     stopMode = "HIGH",
 
     prc = "pressurizedReactionChamber_4",
+    substrateBarrel = "sophisticatedstorage:barrel_4",
+    substrateCapacity = 8650752,
     outputBarrel = "sophisticatedstorage:barrel_3",
     outputCapacity = 270336,
 
@@ -192,8 +194,12 @@ local function readPrc()
 
     if inputItemReadable then
         if type(inputItem) == "table" then
-            substrateCount = tonumber(inputItem.count) or 0
             substrateName = inputItem.name
+            if inputItem.name == "mekanism:substrate" then
+                substrateCount = tonumber(inputItem.count) or 0
+            else
+                substrateCount = 0
+            end
         else
             substrateCount = 0
         end
@@ -224,13 +230,16 @@ end
 
 local function collectData()
     local prc = readPrc()
+    local substrateBuffer = summarizeBarrel(config.substrateBarrel)
     local output = summarizeBarrel(config.outputBarrel)
 
     return {
         prc=prc,
+        substrateBuffer=substrateBuffer,
+        substrateBufferFill=ratio(substrateBuffer.count, config.substrateCapacity),
         output=output,
         outputFill=ratio(output.count, config.outputCapacity),
-        online=prc.present and output.present,
+        online=prc.present and substrateBuffer.present and output.present,
     }
 end
 
@@ -247,16 +256,23 @@ local function setPrcMode(targetMode)
     return pcall(prc.setRedstoneMode, targetMode)
 end
 
-local function inputUnavailable(prc)
-    if prc.substrateReadable and (tonumber(prc.substrateCount) or 0) <= 0 then
+local function inputUnavailable(data)
+    local bufferCount =
+        data.substrateBuffer
+        and tonumber(data.substrateBuffer.count)
+        or 0
+
+    local prcReserve = tonumber(data.prc.substrateCount) or 0
+
+    if bufferCount <= 0 and prcReserve <= 0 then
         return "HOLD SUBSTRATE"
     end
 
-    if prc.liquidEtheneReadable and (tonumber(prc.liquidEtheneFill) or 0) <= 0 then
+    if data.prc.liquidEtheneReadable and (tonumber(data.prc.liquidEtheneFill) or 0) <= 0 then
         return "HOLD LIQ ETHENE"
     end
 
-    if prc.oxygenReadable and (tonumber(prc.oxygenFill) or 0) <= 0 then
+    if data.prc.oxygenReadable and (tonumber(data.prc.oxygenFill) or 0) <= 0 then
         return "HOLD O2"
     end
 
@@ -300,7 +316,7 @@ local function applyAuto(data)
         return
     end
 
-    local inputHold = inputUnavailable(data.prc)
+    local inputHold = inputUnavailable(data)
     if inputHold then
         autoState.reason = inputHold
         setPrcMode(config.stopMode)
@@ -335,7 +351,7 @@ local function healthState(data)
         return "WARN"
     end
 
-    if data.output.mixed then
+    if data.output.mixed or data.substrateBuffer.mixed then
         return "WARN"
     end
 
@@ -350,6 +366,9 @@ local function buildModuleStatus(data)
     local alarms = {}
     if data.output.mixed then
         table.insert(alarms, "OUTPUT BUFFER MIXED")
+    end
+    if data.substrateBuffer.mixed then
+        table.insert(alarms, "SUBSTRATE BUFFER MIXED")
     end
     if data.prc.state == "UNKNOWN" or data.prc.state == "WARN" then
         table.insert(alarms, "PRC CONTROL STATE")
@@ -384,15 +403,19 @@ local function buildModuleStatus(data)
             hdpe=outputFill,
             liquidEthene=data.prc.liquidEtheneFill,
             oxygen=data.prc.oxygenFill,
+            substrate=data.substrateBufferFill,
         },
 
         ui={
             prcName=config.prc,
             prcState=data.prc.state,
 
-            substrateReadable=data.prc.substrateReadable,
-            substrateCount=data.prc.substrateCount,
-            substrateName=data.prc.substrateName,
+            substrateReadable=data.substrateBuffer.readable,
+            substrateCount=data.substrateBuffer.count,
+            substrateName=data.substrateBuffer.itemName,
+            substrateCapacity=config.substrateCapacity,
+            substrateFill=data.substrateBufferFill,
+            substratePrcReserve=data.prc.substrateCount,
 
             liquidEtheneReadable=data.prc.liquidEtheneReadable,
             liquidEtheneFill=data.prc.liquidEtheneFill,
@@ -422,8 +445,11 @@ local function buildModuleStatus(data)
             },
             {
                 label="SUBSTRATE",
-                value=data.prc.substrateReadable
-                    and tostring(data.prc.substrateCount or 0)
+                value=data.substrateBuffer.readable
+                    and ("%d / %d"):format(
+                        tonumber(data.substrateBuffer.count) or 0,
+                        config.substrateCapacity
+                    )
                     or "N/A",
             },
             {
