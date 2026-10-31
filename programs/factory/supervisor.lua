@@ -1177,7 +1177,7 @@ local function renderHdpe(now, module)
         (tonumber(ui.outputResume) or 0.80)*100
     ),colors.gray)
 
-    local modeY=math.max(27,height-6)
+    local modeY=math.max(25,height-7)
     writeAt(3,modeY,"MODE :",colors.lightGray)
     writeAt(10,modeY,mode,modeColor(mode))
 
