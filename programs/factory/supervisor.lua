@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.9.7"
+local PROGRAM_VERSION = "0.9.8"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -595,9 +595,10 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
         local o2SourceX = topPortX(leftX, nodeWidth, "right")
         local o2DropX = topPortX(rightX, nodeWidth, "right")
 
-        writeAt(o2SourceX, h2Y, "^", o2Color)
+        -- Keep the source marker outside the H2/O2 frame.
+        writeAt(o2SourceX, h2Y - 1, "^", o2Color)
 
-        for y = o2Y + 1, h2Y - 1 do
+        for y = o2Y + 1, h2Y - 2 do
             writeAt(o2SourceX, y, "|", o2Color)
         end
 
@@ -610,12 +611,12 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
             true
         )
 
-        for y = o2Y + 1, hdpeY - 1 do
+        for y = o2Y + 1, hdpeY - 2 do
             writeAt(o2DropX, y, "|", o2Color)
         end
 
-        -- Replace one character of the top frame with a clear input arrow.
-        writeAt(o2DropX, hdpeY, "v", o2Color)
+        -- Keep the destination marker outside the HDPE frame.
+        writeAt(o2DropX, hdpeY - 1, "v", o2Color)
 
         local hdpeFill =
             type(hdpeUi.outputFill) == "number"
