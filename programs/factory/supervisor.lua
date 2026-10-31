@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.9.3"
+local PROGRAM_VERSION = "0.9.4"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -576,7 +576,10 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
         -- H2/O2 -> HDPE : O2 bypasses ETHENE on its own upper route.
         local o2Y = 5
         local o2StartX = leftX + nodeWidth - 1
-        local o2DropX = math.max(centerX + nodeWidth + 3, rightX - 5)
+
+        -- Feed O2 into the HDPE node from above instead of through its left
+        -- side. This keeps the RUNTIME/MODE/STATE/HEALTH rows visually clean.
+        local o2DropX = rightX + math.floor(nodeWidth / 2)
 
         drawResourceLink(
             o2StartX,
@@ -587,20 +590,12 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
             true
         )
 
-        for y = o2Y + 1, hdpeY + 1 do
+        for y = o2Y + 1, hdpeY - 1 do
             writeAt(o2DropX, y, "|", o2Color)
         end
 
-        -- Final short hop into HDPE. The resource is already identified on
-        -- the upper route, so keep this segment clean and aligned.
-        drawResourceLink(
-            o2DropX,
-            hdpeInX,
-            hdpeY + 1,
-            "",
-            o2Color,
-            true
-        )
+        -- Replace one character of the top frame with a clear input arrow.
+        writeAt(o2DropX, hdpeY, "v", o2Color)
 
         local hdpeFill =
             type(hdpeUi.outputFill) == "number"
