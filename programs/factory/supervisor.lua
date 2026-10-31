@@ -1224,9 +1224,26 @@ local function renderEthene(now, module)
         type(ui.biofuelFill)=="number" and string.format("%.1f%%",ui.biofuelFill*100) or "N/A"
     ),colors.yellow)
 
-    local substrateTotal=tonumber(ui.substrateTotal) or 0
-    local substrateColor=substrateTotal>=96 and colors.orange or colors.lightGray
-    writeAt(3,16,"SUBSTRATE : "..tostring(substrateTotal).." | OUTPUT QE",substrateColor)
+    local substrateTotal=tonumber(ui.substrateBufferCount or ui.substrateTotal) or 0
+    local substrateCapacity=tonumber(ui.substrateBufferCapacity) or 0
+    local substrateFill=ui.substrateBufferFill
+    local substrateColor=
+        type(substrateFill)=="number" and substrateFill>=0.95 and colors.orange
+        or colors.lightGray
+
+    local substrateText
+    if substrateCapacity>0 then
+        substrateText=("%s / %s (%s)"):format(
+            tostring(substrateTotal),
+            tostring(substrateCapacity),
+            type(substrateFill)=="number"
+                and string.format("%.1f%%",substrateFill*100)
+                or "N/A"
+        )
+    else
+        substrateText=tostring(substrateTotal)
+    end
+    writeAt(3,16,"SUB BUFFER: "..substrateText,substrateColor)
 
     local conversionState=tostring(ui.conversionState or "N/A")
     if ui.conversionHold then conversionState="HOLD" end
