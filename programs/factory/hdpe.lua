@@ -264,7 +264,9 @@ local function inputUnavailable(data)
 
     local prcReserve = tonumber(data.prc.substrateCount) or 0
 
-    if bufferCount <= 0 and prcReserve <= 0 then
+    if data.substrateBuffer.readable
+        and bufferCount <= 0
+        and prcReserve <= 0 then
         return "HOLD SUBSTRATE"
     end
 
@@ -351,7 +353,9 @@ local function healthState(data)
         return "WARN"
     end
 
-    if data.output.mixed or data.substrateBuffer.mixed then
+    if data.output.mixed
+        or data.substrateBuffer.mixed
+        or data.substrateBuffer.readable == false then
         return "WARN"
     end
 
@@ -369,6 +373,8 @@ local function buildModuleStatus(data)
     end
     if data.substrateBuffer.mixed then
         table.insert(alarms, "SUBSTRATE BUFFER MIXED")
+    elseif data.substrateBuffer.readable == false then
+        table.insert(alarms, "SUBSTRATE BUFFER UNREADABLE")
     end
     if data.prc.state == "UNKNOWN" or data.prc.state == "WARN" then
         table.insert(alarms, "PRC CONTROL STATE")
