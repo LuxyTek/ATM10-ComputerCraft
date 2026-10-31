@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.9.6"
+local PROGRAM_VERSION = "0.9.7"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -387,6 +387,15 @@ local function flowColor(module, now, fill, redAt, warnAt)
     return colors.lime
 end
 
+local function topPortX(x, nodeWidth, side)
+    -- Keep top-edge connectors away from the centered module title.
+    -- Reserve two columns near each corner as connection zones.
+    if side == "left" then
+        return x + 2
+    end
+    return x + nodeWidth - 3
+end
+
 local function drawResourceLink(x1, x2, y, label, color, arrowRight)
     if x2 < x1 then return end
 
@@ -583,8 +592,8 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
         -- Anchor O2 on the top edge of H2/O2, then route it across the top
         -- and down into the top edge of HDPE. This keeps both endpoints
         -- visually tied to their source/destination modules.
-        local o2SourceX = leftX + math.floor(nodeWidth / 2)
-        local o2DropX = rightX + math.floor(nodeWidth / 2)
+        local o2SourceX = topPortX(leftX, nodeWidth, "right")
+        local o2DropX = topPortX(rightX, nodeWidth, "right")
 
         writeAt(o2SourceX, h2Y, "^", o2Color)
 
