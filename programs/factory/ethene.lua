@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.3.1"
+local PROGRAM_VERSION = "0.3.2"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 
 local defaults = {
@@ -9,6 +9,8 @@ local defaults = {
     etheneTank = "ultimateMaxChemicalTank_2",
     condensentrator = "rotaryCondensentrator_0",
     liquidEtheneTank = "ultimateFluidTank_7",
+    substrateBarrel = "sophisticatedstorage:barrel_4",
+    substrateCapacity = 8650752,
 
     lines = {
         {
@@ -348,12 +350,14 @@ local function collectData()
     local hydrogen = findHydrogen()
     local condensentrator = readCondensentrator(config.condensentrator)
     local liquidEthene = readFluidTank(config.liquidEtheneTank)
+    local substrateBuffer = summarizeInventory(config.substrateBarrel)
 
     if not biofuel.present
         or not ethene.present
         or not hydrogen.present
         or not condensentrator.present
-        or not liquidEthene.present then
+        or not liquidEthene.present
+        or not substrateBuffer.present then
         criticalPresent = false
     end
 
@@ -364,6 +368,7 @@ local function collectData()
         hydrogen=hydrogen,
         condensentrator=condensentrator,
         liquidEthene=liquidEthene,
+        substrateBuffer=substrateBuffer,
         online=criticalPresent,
     }
 end
@@ -625,7 +630,9 @@ end
 local function buildModuleStatus(data)
     local state = moduleState(data)
     local health = healthState(data)
-    local substrateTotal = countSubstrate(data)
+    local substrateSlots = countSubstrate(data)
+    local substrateBufferCount = tonumber(data.substrateBuffer.count) or 0
+    local substrateBufferFill = ratio(substrateBufferCount, config.substrateCapacity)
 
     local lines = {}
     local machines = {}
@@ -728,6 +735,7 @@ local function buildModuleStatus(data)
             liquidEthene=data.liquidEthene.fill,
             hydrogen=data.hydrogen.fill,
             biofuel=ratio(data.biofuel.count, config.biofuelCapacity),
+            substrate=substrateBufferFill,
         },
 
         ui={
@@ -751,8 +759,12 @@ local function buildModuleStatus(data)
             biofuelFill=ratio(data.biofuel.count, config.biofuelCapacity),
             biofuelPrcReserve=totalPrcBiofuel(data),
 
-            substrateTotal=substrateTotal,
-            outputPath="QE",
+            substrateTotal=substrateBufferCount,
+            substrateBufferCount=substrateBufferCount,
+            substrateBufferCapacity=config.substrateCapacity,
+            substrateBufferFill=substrateBufferFill,
+            substratePrcSlots=substrateSlots,
+            outputPath="BUFFER",
 
             targetLines=autoState.targetLines,
             lines=lines,
@@ -764,7 +776,7 @@ local function buildModuleStatus(data)
             {label="LIQ ETHENE", value=type(data.liquidEthene.fill)=="number" and ("%.1f%%"):format(data.liquidEthene.fill*100) or "N/A"},
             {label="H2", value=type(data.hydrogen.fill)=="number" and ("%.1f%%"):format(data.hydrogen.fill*100) or "N/A"},
             {label="BIOFUEL", value=tostring(data.biofuel.count or 0)},
-            {label="SUBSTRATE", value=tostring(substrateTotal)},
+            {label="SUBSTRATE", value=("%d / %d"):format(substrateBufferCount, config.substrateCapacity)},
         },
 
         alarms=health == "WARN" and {"SUBSTRATE OUTPUT HIGH"} or {},
