@@ -63,6 +63,52 @@ Supervision du reseau Applied Energistics 2 via **Advanced Peripherals ME Bridge
 
 Les donnees ME lourdes sont mises en cache et rafraichies moins souvent afin de conserver une interface reactive.
 
+## Factory Control - nouveau projet
+
+Le depot contient maintenant un second chantier independant du dashboard V1 : une usine Mekanism pilotee par CC:Tweaked.
+
+Le premier prototype est une cellule de production **Hydrogen / Oxygen** :
+
+```text
+Electric Pump
+    |
+Fluid Tank (Water)
+    |
+Electrolytic Separator
+    |
+    +--> Chemical Tank (Hydrogen)
+    |
+    +--> Chemical Tank (Oxygen)
+```
+
+Objectifs du prototype :
+
+- supervision Water / H2 / O2 / Energy ;
+- detection des peripheriques Mekanism ;
+- arret / reprise controles par CC ;
+- gestion de seuils et d'alarmes ;
+- base reutilisable pour les futures lignes chimiques ;
+- preparation d'un futur export vers la base via Quantum Entangloporter.
+
+Documentation :
+
+- `docs/factory/architecture.md`
+- `docs/factory/proto-h2o2.md`
+
+Premier outil de diagnostic :
+
+```lua
+programs/factory/peripheral_probe
+```
+
+La configuration de reference est dans :
+
+```text
+config/factory_h2o2.example.lua
+```
+
+Le projet Factory Control est developpe separement afin de ne pas perturber la baseline stable du dashboard V1.0.0.
+
 ## Installation
 
 Sur le Computer CC:Tweaked :
