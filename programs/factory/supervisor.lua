@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.9.5"
+local PROGRAM_VERSION = "0.9.6"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -545,10 +545,14 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
 
         local liqColor = flowColor(ethene, now, liqFill, 0.00, 0.05)
         local o2Color = flowColor(h2o2, now, o2Fill, 0.10, 0.20)
+        local subAvailable =
+            (tonumber(hdpeUi.substrateCount) or 0) > 0
+            or (tonumber(hdpeUi.substratePrcReserve) or 0) > 0
+
         local subColor =
             tostring(hdpe.health or "") == "FAULT" and colors.red
             or (hdpeUi.substrateReadable == false and colors.gray)
-            or ((tonumber(hdpeUi.substrateCount) or 0) <= 0 and colors.orange)
+            or (not subAvailable and colors.orange)
             or colors.lime
 
         local etheneOutX = centerX + nodeWidth
@@ -1327,11 +1331,18 @@ local function renderHdpe(now, module)
 
     local substrateText = ui.substrateReadable == false
         and "N/A"
-        or tostring(ui.substrateCount or 0)
-    writeAt(3,14,"SUBSTRATE : "..substrateText,colors.yellow)
+        or ("%s / %s (%s)"):format(
+            tostring(ui.substrateCount or 0),
+            tostring(ui.substrateCapacity or "?"),
+            type(ui.substrateFill)=="number"
+                and string.format("%.1f%%",ui.substrateFill*100)
+                or "N/A"
+        )
+    writeAt(3,14,"SUB BUFFER: "..substrateText,colors.yellow)
+    writeAt(3,15,"PRC RESERVE: "..tostring(ui.substratePrcReserve or 0),colors.gray)
 
-    writeAt(3,16,"PRC",colors.cyan)
-    writeAt(5,17,"STATE  : "..tostring(ui.prcState or "UNKNOWN"),
+    writeAt(3,17,"PRC",colors.cyan)
+    writeAt(5,18,"STATE  : "..tostring(ui.prcState or "UNKNOWN"),
         stateColor(tostring(ui.prcState or "UNKNOWN")))
 
     local energyText="ENERGY : N/A"
@@ -1341,14 +1352,14 @@ local function renderHdpe(now, module)
             compact(ui.maxEnergy," FE")
         )
     end
-    writeAt(5,18,energyText,colors.lightGray)
-    writeAt(5,19,"USAGE  : "..compact(ui.energyUsage," FE/t"),colors.lightGray)
+    writeAt(5,19,energyText,colors.lightGray)
+    writeAt(5,20,"USAGE  : "..compact(ui.energyUsage," FE/t"),colors.lightGray)
 
-    writeAt(3,21,"OUTPUT BUFFER",colors.green)
+    writeAt(3,22,"OUTPUT BUFFER",colors.green)
     local outputItem=tostring(ui.outputItem or "EMPTY")
         :gsub("^.-:",""):gsub("_"," "):upper()
-    writeAt(5,22,outputItem,colors.white)
-    writeAt(5,23,("COUNT : %s / %s  (%s)"):format(
+    writeAt(5,23,outputItem,colors.white)
+    writeAt(5,24,("COUNT : %s / %s  (%s)"):format(
         tostring(ui.outputCount or 0),
         tostring(ui.outputCapacity or "?"),
         type(ui.outputFill)=="number"
@@ -1356,12 +1367,12 @@ local function renderHdpe(now, module)
             or "N/A"
     ),colors.lightGray)
 
-    writeAt(5,24,("STOP %.0f%% | RESUME %.0f%%"):format(
+    writeAt(5,25,("STOP %.0f%% | RESUME %.0f%%"):format(
         (tonumber(ui.outputStop) or 0.95)*100,
         (tonumber(ui.outputResume) or 0.80)*100
     ),colors.gray)
 
-    local modeY=math.max(25,height-7)
+    local modeY=math.max(27,height-7)
     writeAt(3,modeY,"MODE :",colors.lightGray)
     writeAt(10,modeY,mode,modeColor(mode))
 
