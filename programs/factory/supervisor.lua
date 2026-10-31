@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.8.1"
+local PROGRAM_VERSION = "0.9.0"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -8,6 +8,7 @@ local MODULE_PROGRAMS = {
     { id = "h2o2", path = "/programs/factory/h2o2.lua" },
     { id = "biofuel", path = "/programs/factory/biofuel.lua" },
     { id = "ethene", path = "/programs/factory/ethene.lua" },
+    { id = "hdpe", path = "/programs/factory/hdpe.lua" },
 }
 
 local defaults = {
@@ -109,6 +110,10 @@ local ethenePrevBounds = nil
 local etheneNextBounds = nil
 local etheneLineBounds = {}
 local etheneMachineBounds = {}
+
+local hdpeModeBounds = nil
+local hdpeStartBounds = nil
+local hdpeStopBounds = nil
 
 local updateConfirmUntil = 0
 local updateInProgress = false
@@ -365,7 +370,7 @@ local function renderGenericMap(now, list)
     end
 end
 
-local function renderConnectedMap(now, list, h2o2, biofuel, ethene)
+local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
     local cardWidth = math.min(24, math.max(20, math.floor((width - 8) / 2)))
     local leftX = 2
     local rightX = width - cardWidth - 1
@@ -374,12 +379,14 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene)
     local h2Y = 5
     local etheneY = 10
     local bioY = 17
+    local hdpeY = 21
 
     renderMapCard(now, h2o2, leftX, h2Y, cardWidth)
     renderMapCard(now, biofuel, leftX, bioY, cardWidth)
     renderMapCard(now, ethene, rightX, etheneY, cardWidth)
 
     local h2Fill = type(h2o2.metrics) == "table" and h2o2.metrics.hydrogen or nil
+    local o2Fill = type(h2o2.metrics) == "table" and h2o2.metrics.oxygen or nil
     local bioFill =
         type(biofuel.ui) == "table" and biofuel.ui.outputFill
         or (type(biofuel.metrics) == "table" and biofuel.metrics.biofuel or nil)
@@ -398,6 +405,7 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene)
         or ("BIOFUEL " .. flowPercent(bioFill))
 
     local h2Color = flowColor(h2o2, now, h2Fill, 0.10, 0.20)
+    local o2Color = flowColor(h2o2, now, o2Fill, 0.10, 0.20)
     local bioColor = flowColor(biofuel, now, bioFill, 0.00, 0.05)
 
     drawFlow(leftX + cardWidth, junctionX, h2Y + 3, h2Label, h2Color)
@@ -417,20 +425,51 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene)
         type(ethene.ui) == "table" and ethene.ui.liquidEtheneFill
         or (type(ethene.metrics) == "table" and ethene.metrics.liquidEthene or nil)
 
-    if etheneY + 8 <= height - 2 then
+    local hdpeRendered = false
+    if hdpe ~= nil and height >= 30 then
+        hdpeRendered = true
+        renderMapCard(now, hdpe, rightX, hdpeY, cardWidth)
+
+        local etheneColor = flowColor(ethene, now, liquidEtheneFill, -1, -1)
+        writeAt(rightX, etheneY + 8,
+            "LIQ " .. flowPercent(liquidEtheneFill) .. " + SUB -> HDPE",
+            etheneColor)
+
+        writeAt(rightX + 2, etheneY + 9, "|", colors.gray)
+        writeAt(rightX + 2, etheneY + 10, "v", colors.cyan)
+
+        local o2Label = "O2 " .. flowPercent(o2Fill) .. " ->"
+        local o2X = math.max(leftX + cardWidth + 1, rightX - #o2Label - 1)
+        writeAt(o2X, hdpeY + 3, o2Label, o2Color)
+
+        local hdpeFill =
+            type(hdpe.ui) == "table" and hdpe.ui.outputFill
+            or (type(hdpe.metrics) == "table" and hdpe.metrics.hdpe or nil)
+
+        if hdpeY + 8 <= height - 2 then
+            local hdpeColor = flowColor(hdpe, now, hdpeFill, -1, -1)
+            writeAt(rightX, hdpeY + 8, "HDPE OUT  " .. flowPercent(hdpeFill), hdpeColor)
+        end
+    elseif etheneY + 8 <= height - 2 then
         local outputColor = flowColor(ethene, now, liquidEtheneFill, -1, -1)
         writeAt(rightX, etheneY + 8, "LIQ ETHENE  " .. flowPercent(liquidEtheneFill), outputColor)
     end
 
     local extras = {}
     for _, module in ipairs(list) do
-        if module.id ~= "h2o2" and module.id ~= "biofuel" and module.id ~= "ethene" then
+        local isCore =
+            module.id == "h2o2"
+            or module.id == "biofuel"
+            or module.id == "ethene"
+            or (hdpeRendered and module.id == "hdpe")
+
+        if not isCore then
             table.insert(extras, module)
         end
     end
 
     if #extras > 0 then
-        local extrasY = 26
+        local extrasY = hdpeRendered and 30 or 26
         if extrasY <= height - 2 then
             writeAt(2, extrasY, "OTHER MODULES", colors.cyan)
             local y = extrasY + 1
@@ -473,6 +512,7 @@ local function renderMap(now, list)
     local h2o2 = findModule(list, "h2o2")
     local biofuel = findModule(list, "biofuel")
     local ethene = findModule(list, "ethene")
+    local hdpe = findModule(list, "hdpe")
 
     local connectedLayoutFits =
         width >= 54
@@ -482,7 +522,7 @@ local function renderMap(now, list)
         and ethene ~= nil
 
     if connectedLayoutFits then
-        renderConnectedMap(now, list, h2o2, biofuel, ethene)
+        renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
     else
         renderGenericMap(now, list)
     end
@@ -1070,6 +1110,104 @@ local function sendEtheneControl(action,target,targetMode)
     os.queueEvent("factory_ethene_control",action,target or "",targetMode)
 end
 
+local function sendHdpeControl(action,targetMode)
+    os.queueEvent("factory_hdpe_control",action,targetMode)
+end
+
+local function renderHdpe(now, module)
+    hdpeModeBounds = nil
+    hdpeStartBounds = nil
+    hdpeStopBounds = nil
+
+    local backLabel = "[ < MODULES ]"
+    writeAt(2,2,backLabel,colors.white,colors.gray)
+    backBounds={x1=2,x2=2+#backLabel-1,y1=2,y2=2}
+
+    centered(1,"FACTORY HDPE  v"..tostring(module.version or "?"),colors.cyan)
+
+    centered(4,module.health=="FAULT" and "SYSTEME INCOMPLET" or "SYSTEME ONLINE",
+        module.health=="FAULT" and colors.red or healthColor(module.health))
+    centered(5,"PROCESS : "..tostring(module.state or "?"),stateColor(module.state))
+
+    local ui=type(module.ui)=="table" and module.ui or {}
+    local mode=tostring(module.mode or "AUTO")
+
+    local runtime,runtimeColor=runtimeState(module,false)
+    writeAt(3,6,"RUNTIME : "..runtime,runtimeColor)
+    local runtimeDetail=runtimeDetailText(module)
+    if runtimeDetail then writeAt(math.max(24,width-24),6,runtimeDetail,colors.gray) end
+
+    drawH2O2Bar(8,"LIQ ETHENE",ui.liquidEtheneFill,colors.lime)
+    drawH2O2Bar(10,"OXYGEN",ui.oxygenFill,colors.lightBlue)
+    drawH2O2Bar(12,"HDPE OUT",ui.outputFill,colors.green)
+
+    local substrateText = ui.substrateReadable == false
+        and "N/A"
+        or tostring(ui.substrateCount or 0)
+    writeAt(3,14,"SUBSTRATE : "..substrateText,colors.yellow)
+
+    writeAt(3,16,"PRC",colors.cyan)
+    writeAt(5,17,"STATE  : "..tostring(ui.prcState or "UNKNOWN"),
+        stateColor(tostring(ui.prcState or "UNKNOWN")))
+
+    local energyText="ENERGY : N/A"
+    if type(ui.energy)=="number" and type(ui.maxEnergy)=="number" then
+        energyText=("ENERGY : %s / %s"):format(
+            compact(ui.energy," FE"),
+            compact(ui.maxEnergy," FE")
+        )
+    end
+    writeAt(5,18,energyText,colors.lightGray)
+    writeAt(5,19,"USAGE  : "..compact(ui.energyUsage," FE/t"),colors.lightGray)
+
+    writeAt(3,21,"OUTPUT BUFFER",colors.green)
+    local outputItem=tostring(ui.outputItem or "EMPTY")
+        :gsub("^.-:",""):gsub("_"," "):upper()
+    writeAt(5,22,outputItem,colors.white)
+    writeAt(5,23,("COUNT : %s / %s  (%s)"):format(
+        tostring(ui.outputCount or 0),
+        tostring(ui.outputCapacity or "?"),
+        type(ui.outputFill)=="number"
+            and string.format("%.1f%%",ui.outputFill*100)
+            or "N/A"
+    ),colors.lightGray)
+
+    writeAt(5,24,("STOP %.0f%% | RESUME %.0f%%"):format(
+        (tonumber(ui.outputStop) or 0.95)*100,
+        (tonumber(ui.outputResume) or 0.80)*100
+    ),colors.gray)
+
+    local modeY=math.max(27,height-6)
+    writeAt(3,modeY,"MODE :",colors.lightGray)
+    writeAt(10,modeY,mode,modeColor(mode))
+
+    local modeLabel=mode=="AUTO" and "[ MANUAL ]" or "[ AUTO ]"
+    local mx=width-#modeLabel-1
+    writeAt(mx,modeY,modeLabel,colors.white,mode=="AUTO" and colors.blue or colors.lime)
+    hdpeModeBounds={x1=mx,x2=mx+#modeLabel-1,y1=modeY,y2=modeY}
+
+    writeAt(3,modeY+2,"STATUS :",colors.gray)
+    local reason=tostring(module.reason or "-")
+    local reasonColor=colors.lightGray
+    if reason:find("FAULT",1,true) then reasonColor=colors.red
+    elseif reason:find("HOLD",1,true) then reasonColor=colors.orange
+    elseif reason:find("PRODUCTION",1,true) then reasonColor=colors.lime end
+    writeAt(12,modeY+2,reason,reasonColor)
+
+    local controlY=height-2
+    if mode=="AUTO" then
+        writeAt(3,controlY,"AUTO ACTIF - CONTROLE MANUEL VERROUILLE",colors.lightGray)
+    else
+        local startLabel="[ START ]"
+        local stopLabel="[ STOP ]"
+        writeAt(3,controlY,startLabel,colors.black,colors.lime)
+        hdpeStartBounds={x1=3,x2=3+#startLabel-1,y1=controlY,y2=controlY}
+        local sx=3+#startLabel+2
+        writeAt(sx,controlY,stopLabel,colors.white,colors.red)
+        hdpeStopBounds={x1=sx,x2=sx+#stopLabel-1,y1=controlY,y2=controlY}
+    end
+end
+
 local function renderDetail(now)
     moduleBounds = {}
 
@@ -1166,6 +1304,9 @@ render = function()
     h2o2NextBounds = nil
     h2o2LineBounds = {}
     h2o2MachineBounds = {}
+    hdpeModeBounds = nil
+    hdpeStartBounds = nil
+    hdpeStopBounds = nil
 
     if currentView == "detail" and selectedModuleId == "h2o2" and modules.h2o2 then
         renderH2O2(now, modules.h2o2)
@@ -1173,6 +1314,8 @@ render = function()
         renderBiofuel(now, modules.biofuel)
     elseif currentView == "detail" and selectedModuleId == "ethene" and modules.ethene then
         renderEthene(now, modules.ethene)
+    elseif currentView == "detail" and selectedModuleId == "hdpe" and modules.hdpe then
+        renderHdpe(now, modules.hdpe)
     elseif currentView == "detail" then
         renderDetail(now)
     else
@@ -1253,6 +1396,10 @@ end
 
 local function moduleEtheneLoop()
     runModuleProcess(MODULE_PROGRAMS[3])
+end
+
+local function moduleHdpeLoop()
+    runModuleProcess(MODULE_PROGRAMS[4])
 end
 
 local function uiLoop()
@@ -1384,6 +1531,18 @@ local function uiLoop()
                             end
                         end
                     end
+                elseif currentView == "detail" and selectedModuleId == "hdpe" then
+                    if inside(hdpeModeBounds,x,y) then
+                        sendHdpeControl("toggle_mode")
+                        handled=true
+                    elseif inside(hdpeStartBounds,x,y) then
+                        sendHdpeControl("prc","DISABLED")
+                        handled=true
+                    elseif inside(hdpeStopBounds,x,y) then
+                        sendHdpeControl("prc","HIGH")
+                        handled=true
+                    end
+
                 end
 
                 if not handled and inside(updateBounds, x, y) and not updateInProgress then
@@ -1407,4 +1566,4 @@ local function refreshLoop()
     end
 end
 
-parallel.waitForAny(statusLoop, uiLoop, refreshLoop, moduleH2O2Loop, moduleBiofuelLoop, moduleEtheneLoop)
+parallel.waitForAny(statusLoop, uiLoop, refreshLoop, moduleH2O2Loop, moduleBiofuelLoop, moduleEtheneLoop, moduleHdpeLoop)
