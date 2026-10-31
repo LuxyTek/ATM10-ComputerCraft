@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.9.0"
+local PROGRAM_VERSION = "0.9.1"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -323,6 +323,47 @@ local function renderMapCard(now, module, x, y, cardWidth)
     }
 end
 
+local function renderFlowNode(now, module, x, y, nodeWidth)
+    local net = networkState(module, now)
+    local offline = net == "OFFLINE"
+    local runtime, runtimeColor = runtimeState(module, offline)
+    local mode = offline and "N/A" or tostring(module.mode or "N/A")
+    local state = offline and "N/A" or tostring(module.state or "N/A")
+    local health = offline and "N/A" or tostring(module.health or "N/A")
+    local label = tostring(module.label or module.id or "?")
+
+    writeAt(x, y, "[ " .. label .. " ]", colors.cyan)
+    writeAt(x, y + 1, "RUNTIME " .. runtime, runtimeColor)
+    writeAt(x, y + 2, "MODE    " .. mode, offline and colors.gray or modeColor(mode))
+    writeAt(x, y + 3, "STATE   " .. state, offline and colors.gray or stateColor(state))
+    writeAt(x, y + 4, "HEALTH  " .. health, offline and colors.gray or healthColor(health))
+
+    moduleBounds[#moduleBounds + 1] = {
+        x1=x,
+        x2=math.min(width, x + nodeWidth - 1),
+        y1=y,
+        y2=y + 4,
+        id=module.id,
+    }
+end
+
+local function drawHorizontalRoute(x1, x2, y, label, color, arrowRight)
+    if x2 < x1 then return end
+
+    local span = x2 - x1 + 1
+    local line = string.rep("-", span)
+    writeAt(x1, y, line, color)
+
+    local arrow = arrowRight == false and "<" or ">"
+    writeAt(arrowRight == false and x1 or x2, y, arrow, color)
+
+    local text = " " .. tostring(label) .. " "
+    if #text <= math.max(0, span - 2) then
+        local tx = x1 + math.floor((span - #text) / 2)
+        writeAt(tx, y, text, color, colors.black)
+    end
+end
+
 local function flowPercent(value)
     if type(value) ~= "number" then return "N/A" end
     value = math.max(0, math.min(1, value))
@@ -371,88 +412,171 @@ local function renderGenericMap(now, list)
 end
 
 local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
-    local cardWidth = math.min(24, math.max(20, math.floor((width - 8) / 2)))
+    -- Three-column process map:
+    -- H2/O2 + BIOFUEL -> ETHENE -> HDPE
+    -- O2 also bypasses ETHENE and feeds HDPE directly.
+    local nodeWidth = math.min(19, math.max(17, math.floor((width - 10) / 3)))
     local leftX = 2
-    local rightX = width - cardWidth - 1
-    local junctionX = rightX - 2
+    local centerX = math.floor((width - nodeWidth) / 2) + 1
+    local rightX = width - nodeWidth - 1
 
-    local h2Y = 5
-    local etheneY = 10
-    local bioY = 17
-    local hdpeY = 21
+    local h2Y = 6
+    local bioY = 20
+    local etheneY = 12
+    local hdpeY = 12
 
-    renderMapCard(now, h2o2, leftX, h2Y, cardWidth)
-    renderMapCard(now, biofuel, leftX, bioY, cardWidth)
-    renderMapCard(now, ethene, rightX, etheneY, cardWidth)
+    renderFlowNode(now, h2o2, leftX, h2Y, nodeWidth)
+    renderFlowNode(now, biofuel, leftX, bioY, nodeWidth)
+    renderFlowNode(now, ethene, centerX, etheneY, nodeWidth)
 
-    local h2Fill = type(h2o2.metrics) == "table" and h2o2.metrics.hydrogen or nil
-    local o2Fill = type(h2o2.metrics) == "table" and h2o2.metrics.oxygen or nil
+    local hdpeRendered = hdpe ~= nil and width >= 72 and height >= 27
+    if hdpeRendered then
+        renderFlowNode(now, hdpe, rightX, hdpeY, nodeWidth)
+    end
+
+    local h2Fill =
+        type(ethene.ui) == "table" and ethene.ui.hydrogenFill
+        or (type(h2o2.metrics) == "table" and h2o2.metrics.hydrogen or nil)
+
     local bioFill =
         type(biofuel.ui) == "table" and biofuel.ui.outputFill
         or (type(biofuel.metrics) == "table" and biofuel.metrics.biofuel or nil)
 
-    local h2Net = networkState(h2o2, now)
-    local bioNet = networkState(biofuel, now)
-
-    local h2Label =
-        h2Net == "OFFLINE"
-        and "H2 OFFLINE"
-        or ("H2 " .. flowPercent(h2Fill))
-
-    local bioLabel =
-        bioNet == "OFFLINE"
-        and "BIO OFFLINE"
-        or ("BIOFUEL " .. flowPercent(bioFill))
-
     local h2Color = flowColor(h2o2, now, h2Fill, 0.10, 0.20)
-    local o2Color = flowColor(h2o2, now, o2Fill, 0.10, 0.20)
     local bioColor = flowColor(biofuel, now, bioFill, 0.00, 0.05)
 
-    drawFlow(leftX + cardWidth, junctionX, h2Y + 3, h2Label, h2Color)
-    drawFlow(leftX + cardWidth, junctionX, bioY + 3, bioLabel, bioColor)
+    -- H2/O2 -> ETHENE : route from the H2/O2 node down into ETHENE.
+    local leftOutX = leftX + nodeWidth
+    local etheneInX = centerX - 1
+    local h2RouteX = math.max(leftOutX + 2, centerX - 4)
+    local h2RouteY = h2Y + 4
 
-    for y = h2Y + 4, bioY + 2 do
-        writeAt(junctionX, y, "|", colors.gray)
+    drawHorizontalRoute(
+        leftOutX,
+        h2RouteX,
+        h2RouteY,
+        "H2 " .. flowPercent(h2Fill),
+        h2Color,
+        true
+    )
+    for y = h2RouteY + 1, etheneY + 1 do
+        writeAt(h2RouteX, y, "|", h2Color)
     end
+    writeAt(h2RouteX, etheneY + 1, "+", h2Color)
+    drawHorizontalRoute(
+        h2RouteX + 1,
+        etheneInX,
+        etheneY + 1,
+        "",
+        h2Color,
+        true
+    )
 
-    writeAt(junctionX, h2Y + 3, "+", h2Color)
-    writeAt(junctionX, bioY + 3, "+", bioColor)
+    -- BIOFUEL -> ETHENE : separate lower route, never sharing the H2 line.
+    local bioRouteY = bioY + 1
+    local bioRouteX = math.max(leftOutX + 4, centerX - 2)
+    drawHorizontalRoute(
+        leftOutX,
+        bioRouteX,
+        bioRouteY,
+        "BIO " .. flowPercent(bioFill),
+        bioColor,
+        true
+    )
+    for y = etheneY + 3, bioRouteY - 1 do
+        writeAt(bioRouteX, y, "|", bioColor)
+    end
+    writeAt(bioRouteX, etheneY + 3, "+", bioColor)
+    drawHorizontalRoute(
+        bioRouteX + 1,
+        etheneInX,
+        etheneY + 3,
+        "",
+        bioColor,
+        true
+    )
 
-    local etheneInputY = etheneY + 3
-    writeAt(junctionX, etheneInputY, "+>", colors.cyan)
+    if hdpeRendered then
+        local hdpeUi = type(hdpe.ui) == "table" and hdpe.ui or {}
+        local etheneUi = type(ethene.ui) == "table" and ethene.ui or {}
 
-    local liquidEtheneFill =
-        type(ethene.ui) == "table" and ethene.ui.liquidEtheneFill
-        or (type(ethene.metrics) == "table" and ethene.metrics.liquidEthene or nil)
+        local liqFill =
+            type(hdpeUi.liquidEtheneFill) == "number"
+            and hdpeUi.liquidEtheneFill
+            or etheneUi.liquidEtheneFill
 
-    local hdpeRendered = false
-    if hdpe ~= nil and height >= 30 then
-        hdpeRendered = true
-        renderMapCard(now, hdpe, rightX, hdpeY, cardWidth)
+        local o2Fill =
+            type(hdpeUi.oxygenFill) == "number"
+            and hdpeUi.oxygenFill
+            or (type(h2o2.metrics) == "table" and h2o2.metrics.oxygen or nil)
 
-        local etheneColor = flowColor(ethene, now, liquidEtheneFill, -1, -1)
-        writeAt(rightX, etheneY + 8,
-            "LIQ " .. flowPercent(liquidEtheneFill) .. " + SUB -> HDPE",
-            etheneColor)
+        local substrateLabel = "SUB N/A"
+        if hdpeUi.substrateReadable ~= false and hdpeUi.substrateCount ~= nil then
+            substrateLabel = "SUB " .. tostring(hdpeUi.substrateCount)
+        end
 
-        writeAt(rightX + 2, etheneY + 9, "|", colors.gray)
-        writeAt(rightX + 2, etheneY + 10, "v", colors.cyan)
+        local liqColor = flowColor(ethene, now, liqFill, 0.00, 0.05)
+        local o2Color = flowColor(h2o2, now, o2Fill, 0.10, 0.20)
+        local subColor =
+            tostring(hdpe.health or "") == "FAULT" and colors.red
+            or (hdpeUi.substrateReadable == false and colors.gray)
+            or ((tonumber(hdpeUi.substrateCount) or 0) <= 0 and colors.orange)
+            or colors.lime
 
-        local o2Label = "O2 " .. flowPercent(o2Fill) .. " ->"
-        local o2X = math.max(leftX + cardWidth + 1, rightX - #o2Label - 1)
-        writeAt(o2X, hdpeY + 3, o2Label, o2Color)
+        local etheneOutX = centerX + nodeWidth
+        local hdpeInX = rightX - 1
+
+        -- ETHENE -> HDPE: two distinct resources on two distinct rows.
+        drawHorizontalRoute(
+            etheneOutX,
+            hdpeInX,
+            etheneY + 1,
+            "LIQ " .. flowPercent(liqFill),
+            liqColor,
+            true
+        )
+        drawHorizontalRoute(
+            etheneOutX,
+            hdpeInX,
+            etheneY + 3,
+            substrateLabel,
+            subColor,
+            true
+        )
+
+        -- H2/O2 -> HDPE O2 bypass: a dedicated upper route over ETHENE.
+        local o2Y = 5
+        local o2StartX = leftX + nodeWidth
+        local o2DropX = rightX - 2
+        drawHorizontalRoute(
+            o2StartX,
+            o2DropX,
+            o2Y,
+            "O2 " .. flowPercent(o2Fill),
+            o2Color,
+            true
+        )
+        for y = o2Y + 1, hdpeY - 1 do
+            writeAt(o2DropX, y, "|", o2Color)
+        end
+        writeAt(o2DropX, hdpeY - 1, "v", o2Color)
 
         local hdpeFill =
-            type(hdpe.ui) == "table" and hdpe.ui.outputFill
+            type(hdpeUi.outputFill) == "number"
+            and hdpeUi.outputFill
             or (type(hdpe.metrics) == "table" and hdpe.metrics.hdpe or nil)
 
-        if hdpeY + 8 <= height - 2 then
-            local hdpeColor = flowColor(hdpe, now, hdpeFill, -1, -1)
-            writeAt(rightX, hdpeY + 8, "HDPE OUT  " .. flowPercent(hdpeFill), hdpeColor)
+        local outputColor = flowColor(hdpe, now, hdpeFill, -1, -1)
+        writeAt(rightX, hdpeY + 6, "HDPE OUT " .. flowPercent(hdpeFill) .. " ->", outputColor)
+    else
+        local liquidEtheneFill =
+            type(ethene.ui) == "table" and ethene.ui.liquidEtheneFill
+            or (type(ethene.metrics) == "table" and ethene.metrics.liquidEthene or nil)
+
+        if etheneY + 6 <= height - 2 then
+            local outputColor = flowColor(ethene, now, liquidEtheneFill, -1, -1)
+            writeAt(centerX, etheneY + 6, "LIQ ETHENE " .. flowPercent(liquidEtheneFill) .. " ->", outputColor)
         end
-    elseif etheneY + 8 <= height - 2 then
-        local outputColor = flowColor(ethene, now, liquidEtheneFill, -1, -1)
-        writeAt(rightX, etheneY + 8, "LIQ ETHENE  " .. flowPercent(liquidEtheneFill), outputColor)
     end
 
     local extras = {}
@@ -469,7 +593,7 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
     end
 
     if #extras > 0 then
-        local extrasY = hdpeRendered and 30 or 26
+        local extrasY = 27
         if extrasY <= height - 2 then
             writeAt(2, extrasY, "OTHER MODULES", colors.cyan)
             local y = extrasY + 1
@@ -515,8 +639,8 @@ local function renderMap(now, list)
     local hdpe = findModule(list, "hdpe")
 
     local connectedLayoutFits =
-        width >= 54
-        and height >= 25
+        width >= 72
+        and height >= 27
         and h2o2 ~= nil
         and biofuel ~= nil
         and ethene ~= nil
