@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.9.2"
+local PROGRAM_VERSION = "0.9.3"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -576,7 +576,7 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
         -- H2/O2 -> HDPE : O2 bypasses ETHENE on its own upper route.
         local o2Y = 5
         local o2StartX = leftX + nodeWidth - 1
-        local o2DropX = rightX - 2
+        local o2DropX = math.max(centerX + nodeWidth + 3, rightX - 5)
 
         drawResourceLink(
             o2StartX,
@@ -591,11 +591,13 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
             writeAt(o2DropX, y, "|", o2Color)
         end
 
+        -- Final short hop into HDPE. The resource is already identified on
+        -- the upper route, so keep this segment clean and aligned.
         drawResourceLink(
             o2DropX,
             hdpeInX,
             hdpeY + 1,
-            "O2",
+            "",
             o2Color,
             true
         )
