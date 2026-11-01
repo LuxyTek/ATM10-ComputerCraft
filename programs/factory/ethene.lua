@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.3.2"
+local PROGRAM_VERSION = "0.3.3"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 
 local defaults = {
@@ -9,8 +9,8 @@ local defaults = {
     etheneTank = "ultimateMaxChemicalTank_2",
     condensentrator = "rotaryCondensentrator_0",
     liquidEtheneTank = "ultimateFluidTank_7",
-    substrateBarrel = "sophisticatedstorage:barrel_4",
-    substrateCapacity = 8650752,
+    substrateBarrel = "sophisticatedstorage:barrel_5",
+    substrateItem = "mekanism:substrate",
 
     lines = {
         {
@@ -153,6 +153,43 @@ local function summarizeInventory(name)
         readable=true,
         count=total,
         itemName=dominantName,
+    }
+end
+
+local function summarizeItem(name, itemId)
+    if not peripheral.isPresent(name) then
+        return {
+            present=false,
+            readable=false,
+            count=0,
+            itemName=itemId,
+        }
+    end
+
+    local dev = peripheral.wrap(name)
+    local items = safeCall(dev, "list")
+    if type(items) ~= "table" then
+        return {
+            present=true,
+            readable=false,
+            count=0,
+            itemName=itemId,
+        }
+    end
+
+    local total = 0
+    for _, item in pairs(items) do
+        if type(item) == "table"
+            and item.name == itemId then
+            total = total + (tonumber(item.count) or 0)
+        end
+    end
+
+    return {
+        present=true,
+        readable=true,
+        count=total,
+        itemName=itemId,
     }
 end
 
@@ -350,7 +387,10 @@ local function collectData()
     local hydrogen = findHydrogen()
     local condensentrator = readCondensentrator(config.condensentrator)
     local liquidEthene = readFluidTank(config.liquidEtheneTank)
-    local substrateBuffer = summarizeInventory(config.substrateBarrel)
+    local substrateBuffer = summarizeItem(
+        config.substrateBarrel,
+        config.substrateItem
+    )
 
     if not biofuel.present
         or not ethene.present
@@ -632,7 +672,6 @@ local function buildModuleStatus(data)
     local health = healthState(data)
     local substrateSlots = countSubstrate(data)
     local substrateBufferCount = tonumber(data.substrateBuffer.count) or 0
-    local substrateBufferFill = ratio(substrateBufferCount, config.substrateCapacity)
 
     local lines = {}
     local machines = {}
@@ -735,7 +774,7 @@ local function buildModuleStatus(data)
             liquidEthene=data.liquidEthene.fill,
             hydrogen=data.hydrogen.fill,
             biofuel=ratio(data.biofuel.count, config.biofuelCapacity),
-            substrate=substrateBufferFill,
+            substrateCount=substrateBufferCount,
         },
 
         ui={
@@ -761,8 +800,8 @@ local function buildModuleStatus(data)
 
             substrateTotal=substrateBufferCount,
             substrateBufferCount=substrateBufferCount,
-            substrateBufferCapacity=config.substrateCapacity,
-            substrateBufferFill=substrateBufferFill,
+            substrateBufferItem=config.substrateItem,
+            substrateBufferName=config.substrateBarrel,
             substratePrcSlots=substrateSlots,
             outputPath="BUFFER",
 
@@ -776,7 +815,7 @@ local function buildModuleStatus(data)
             {label="LIQ ETHENE", value=type(data.liquidEthene.fill)=="number" and ("%.1f%%"):format(data.liquidEthene.fill*100) or "N/A"},
             {label="H2", value=type(data.hydrogen.fill)=="number" and ("%.1f%%"):format(data.hydrogen.fill*100) or "N/A"},
             {label="BIOFUEL", value=tostring(data.biofuel.count or 0)},
-            {label="SUBSTRATE", value=("%d / %d"):format(substrateBufferCount, config.substrateCapacity)},
+            {label="SUBSTRATE", value=tostring(substrateBufferCount)},
         },
 
         alarms=health == "WARN" and {"SUBSTRATE OUTPUT HIGH"} or {},
