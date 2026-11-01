@@ -60,8 +60,20 @@ function M.render(target,definition,status,options)
         widgets.stateColor(status.runtime))
 
     w:writeAt(3,4,"MODE",colors.gray)
-    w:writeAt(14,4,tostring(status.mode or "UNKNOWN"),
-        widgets.modeColor(status.mode))
+    local mode=tostring(status.mode or "UNKNOWN")
+    w:writeAt(14,4,mode,widgets.modeColor(mode))
+
+    local bounds={chains={},module={}}
+
+    if options.allowModuleControls and supports(definition,"module.set_mode") then
+        local targetMode=mode=="AUTO" and "MANUAL" or "AUTO"
+        local label="[ "..targetMode.." ]"
+        local x=w.width-#label-1
+        bounds.module.mode=w:button(x,4,label,true,false)
+        bounds.module.mode.action="module.set_mode"
+        bounds.module.mode.args={mode=targetMode}
+        bounds.module.mode.label="MODE "..targetMode
+    end
 
     w:writeAt(3,5,"STATE",colors.gray)
     w:writeAt(14,5,tostring(status.state or "UNKNOWN"),
@@ -95,9 +107,7 @@ function M.render(target,definition,status,options)
         end
     end
 
-    local bounds={chains={}}
-
-    if #(definition.chains or {})>0 and y<w.height-3 then
+     if #(definition.chains or {})>0 and y<w.height-3 then
         w:writeAt(3,y,"SOUS-MODULES",colors.cyan)
         y=y+1
 
@@ -113,18 +123,61 @@ function M.render(target,definition,status,options)
             w:writeAt(5,y,tostring(chain.label or chain.id),colors.white)
             w:writeAt(math.max(30,w.width-25),y,state,widgets.stateColor(state))
 
-            if chain.controllable
-                and options.allowChainControls
-                and supports(definition,"chain.set_enabled") then
-                local label=enabled and "[ OFF ]" or "[ ON ]"
-                local x=w.width-#label-1
-                bounds.chains[chain.id]=w:button(x,y,label,true,false)
-                bounds.chains[chain.id].action="chain.set_enabled"
-                bounds.chains[chain.id].chainId=chain.id
-                bounds.chains[chain.id].targetEnabled=not enabled
+            if chain.controllable and options.allowChainControls then
+                if mode=="AUTO" and supports(definition,"chain.set_enabled") then
+                    local label=enabled and "[ OFF ]" or "[ ON ]"
+                    local x=w.width-#label-1
+                    bounds.chains[chain.id]=w:button(x,y,label,true,false)
+                    bounds.chains[chain.id].action="chain.set_enabled"
+                    bounds.chains[chain.id].args={
+                        chainId=chain.id,
+                        enabled=not enabled,
+                    }
+                    bounds.chains[chain.id].label=
+                        tostring(chain.label or chain.id).." "
+                        ..(enabled and "OFF" or "ON")
+
+                elseif mode=="MANUAL"
+                    and supports(definition,"chain.start")
+                    and supports(definition,"chain.stop") then
+                    local running=state=="RUN"
+                    local label=running and "[ STOP ]" or "[ START ]"
+                    local x=w.width-#label-1
+                    bounds.chains[chain.id]=w:button(
+                        x,y,label,true,false
+                    )
+                    bounds.chains[chain.id].action=
+                        running and "chain.stop" or "chain.start"
+                    bounds.chains[chain.id].args={chainId=chain.id}
+                    bounds.chains[chain.id].label=
+                        tostring(chain.label or chain.id).." "
+                        ..(running and "STOP" or "START")
+                end
             end
 
             y=y+1
+        end
+    end
+
+    if options.allowModuleControls and mode=="MANUAL" then
+        local y=w.height-1
+        local x=3
+
+        if supports(definition,"module.start_all") then
+            local label="[ START ALL ]"
+            bounds.module.startAll=w:button(x,y,label,true,false)
+            bounds.module.startAll.action="module.start_all"
+            bounds.module.startAll.args={}
+            bounds.module.startAll.label="START ALL"
+            x=x+#label+2
+        end
+
+        if supports(definition,"module.stop_all") then
+            local label="[ STOP ALL ]"
+            bounds.module.stopAll=w:button(x,y,label,true,false)
+            bounds.module.stopAll.action="module.stop_all"
+            bounds.module.stopAll.args={}
+            bounds.module.stopAll.label="STOP ALL"
         end
     end
 
