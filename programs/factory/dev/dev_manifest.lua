@@ -1,5 +1,5 @@
 return {
-    version = "0.4.0-dev",
+    version = "0.4.1-dev",
 
     files = {
         { remote="programs/factory/core/contract.lua", localPath="/programs/factory/core/contract.lua" },
@@ -22,6 +22,7 @@ return {
         { remote="programs/factory/tools/ui_v2_smoke_test.lua", localPath="/programs/factory/tools/ui_v2_smoke_test.lua" },
         { remote="programs/factory/tools/h2o2_v2_smoke_test.lua", localPath="/programs/factory/tools/h2o2_v2_smoke_test.lua" },
         { remote="programs/factory/tools/h2o2_v2_live_test.lua", localPath="/programs/factory/tools/h2o2_v2_live_test.lua" },
+        { remote="programs/factory/tools/h2o2_v2_control.lua", localPath="/programs/factory/tools/h2o2_v2_control.lua" },
 
         { remote="programs/factory/dev/dev_updater.lua", localPath="/programs/factory/dev/dev_updater.lua" },
         { remote="programs/factory/dev/dev_manifest.lua", localPath="/programs/factory/dev/dev_manifest.lua" },
