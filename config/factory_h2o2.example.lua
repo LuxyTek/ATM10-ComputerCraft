@@ -24,6 +24,13 @@ return {
         type = "process",
     },
 
+    -- Pont transitoire pour les tests de controle Factory V2.
+    -- Les commandes machines/lignes restent refusees tant que le module
+    -- n'est pas en MANUAL, et chaque paquet V2 doit etre confirme.
+    remoteControl = {
+        enabled = true,
+    },
+
     auto = {
         checkSeconds = 2,
 
