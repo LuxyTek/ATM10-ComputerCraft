@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.1.1"
+local PROGRAM_VERSION = "0.2.0"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 local CONFIG_PATH = "/config/factory_sulfuric_acid.lua"
 
@@ -14,6 +14,10 @@ local defaults = {
     },
     sulfurTrioxideInfuser = "chemicalInfuser_1",
     sulfuricAcidInfuser = "chemicalInfuser_2",
+
+    -- Optional: fill this list once the Water Vapor pump / Condensentrator
+    -- peripheral names are known. Until then the chain toggle is logical only.
+    waterVaporMachines = {},
     auto = {
         outputStop = 0.95,
         outputResume = 0.80,
@@ -60,6 +64,13 @@ local runtimeState = {
     state = "ACTIVE",
     wakeReason = "BOOT",
     lastPoll = 0,
+}
+
+local chainEnabled = {
+    so2 = true,
+    so3 = true,
+    vapor = true,
+    acid = true,
 }
 
 local autoState = {
@@ -170,10 +181,45 @@ local function setOxidizersMode(targetMode)
     return ok
 end
 
+local function setWaterVaporMode(targetMode)
+    local names = type(config.waterVaporMachines) == "table"
+        and config.waterVaporMachines
+        or {}
+
+    if #names == 0 then return false end
+
+    local ok = true
+    for _, name in ipairs(names) do
+        if not setMachineMode(name, targetMode) then ok = false end
+    end
+    return ok
+end
+
+local function setChainMode(chainId, targetMode)
+    if chainId == "so2" then
+        return setOxidizersMode(targetMode)
+    elseif chainId == "so3" then
+        return setMachineMode(config.sulfurTrioxideInfuser, targetMode)
+    elseif chainId == "vapor" then
+        return setWaterVaporMode(targetMode)
+    elseif chainId == "acid" then
+        return setMachineMode(config.sulfuricAcidInfuser, targetMode)
+    end
+    return false
+end
+
 local function setAllMode(targetMode)
     local ok = setOxidizersMode(targetMode)
     if not setMachineMode(config.sulfurTrioxideInfuser, targetMode) then ok = false end
     if not setMachineMode(config.sulfuricAcidInfuser, targetMode) then ok = false end
+
+    -- Water Vapor remains optional until its peripheral mapping is known.
+    if type(config.waterVaporMachines) == "table"
+        and #config.waterVaporMachines > 0
+        and not setWaterVaporMode(targetMode) then
+        ok = false
+    end
+
     return ok
 end
 
@@ -275,30 +321,55 @@ local function applyAuto(data)
     autoState.so3InputHold = updateInputHold(autoState.so3InputHold, data.so3.fill)
     autoState.vaporHold = updateInputHold(autoState.vaporHold, data.vapor.fill)
 
-    setOxidizersMode(autoState.so2Hold and config.stopMode or "DISABLED")
+    local so2CanRun =
+        chainEnabled.so2
+        and not autoState.so2Hold
+
+    setOxidizersMode(so2CanRun and "DISABLED" or config.stopMode)
 
     local so3CanRun =
-        not autoState.so3Hold
+        chainEnabled.so3
+        and not autoState.so3Hold
         and not autoState.so2InputHold
         and not autoState.oxygenHold
+
     setMachineMode(
         config.sulfurTrioxideInfuser,
         so3CanRun and "DISABLED" or config.stopMode
     )
 
+    -- If physical Water Vapor machines are mapped later, this becomes a real
+    -- machine control. With no mapping, the toggle remains a logical gate.
+    if type(config.waterVaporMachines) == "table"
+        and #config.waterVaporMachines > 0 then
+        setWaterVaporMode(
+            chainEnabled.vapor and "DISABLED" or config.stopMode
+        )
+    end
+
     local acidCanRun =
-        not autoState.acidHold
+        chainEnabled.acid
+        and chainEnabled.vapor
+        and not autoState.acidHold
         and not autoState.so3InputHold
         and not autoState.vaporHold
+
     setMachineMode(
         config.sulfuricAcidInfuser,
         acidCanRun and "DISABLED" or config.stopMode
     )
 
     local reasons = {}
-    if autoState.so2Hold then table.insert(reasons, "SULFUR DIOXIDE FULL") end
 
-    if autoState.so3Hold then
+    if not chainEnabled.so2 then
+        table.insert(reasons, "SULFUR DIOXIDE DISABLED")
+    elseif autoState.so2Hold then
+        table.insert(reasons, "SULFUR DIOXIDE FULL")
+    end
+
+    if not chainEnabled.so3 then
+        table.insert(reasons, "SULFUR TRIOXIDE DISABLED")
+    elseif autoState.so3Hold then
         table.insert(reasons, "SULFUR TRIOXIDE FULL")
     elseif autoState.so2InputHold then
         table.insert(reasons, "SULFUR TRIOXIDE WAIT SULFUR DIOXIDE")
@@ -306,7 +377,15 @@ local function applyAuto(data)
         table.insert(reasons, "SULFUR TRIOXIDE WAIT O2")
     end
 
-    if autoState.acidHold then
+    if not chainEnabled.vapor then
+        table.insert(reasons, "WATER VAPOR DISABLED")
+    end
+
+    if not chainEnabled.acid then
+        table.insert(reasons, "SULFURIC ACID DISABLED")
+    elseif not chainEnabled.vapor then
+        table.insert(reasons, "SULFURIC ACID HOLD WATER VAPOR OFF")
+    elseif autoState.acidHold then
         table.insert(reasons, "SULFURIC ACID FULL")
     elseif autoState.so3InputHold then
         table.insert(reasons, "SULFURIC ACID WAIT SULFUR TRIOXIDE")
@@ -314,11 +393,14 @@ local function applyAuto(data)
         table.insert(reasons, "SULFURIC ACID WAIT WATER VAPOR")
     end
 
-    autoState.reason = #reasons == 0 and "PRODUCTION" or table.concat(reasons, " | ")
+    autoState.reason = #reasons == 0
+        and "PRODUCTION"
+        or table.concat(reasons, " | ")
+
     autoState.sleepHold =
-        autoState.so2Hold == true
-        and autoState.so3Hold == true
-        and autoState.acidHold == true
+        (not chainEnabled.so2 or autoState.so2Hold == true)
+        and (not chainEnabled.so3 or autoState.so3Hold == true)
+        and (not chainEnabled.acid or autoState.acidHold == true or not chainEnabled.vapor)
 end
 
 local function moduleState(data)
@@ -400,13 +482,32 @@ local function buildModuleStatus(data)
             oxygenAmount=data.oxygen.amount,
             oxygenCapacity=data.oxygen.capacity,
             oxygenTankCount=data.oxygen.count,
-            so2Stage=autoState.so2Hold and "HOLD FULL" or "RUN",
-            so3Stage=autoState.so3Hold and "HOLD FULL"
+            so2Enabled=chainEnabled.so2,
+            so3Enabled=chainEnabled.so3,
+            vaporEnabled=chainEnabled.vapor,
+            acidEnabled=chainEnabled.acid,
+            vaporPhysicalControl=
+                type(config.waterVaporMachines) == "table"
+                and #config.waterVaporMachines > 0,
+
+            so2Stage=not chainEnabled.so2 and "DISABLED"
+                or autoState.so2Hold and "HOLD FULL"
+                or "RUN",
+            so3Stage=not chainEnabled.so3 and "DISABLED"
+                or autoState.so3Hold and "HOLD FULL"
                 or autoState.so2InputHold and "HOLD SULFUR DIOXIDE"
                 or autoState.oxygenHold and "HOLD O2"
                 or "RUN",
-            vaporStage="BUFFER ONLY",
-            acidStage=autoState.acidHold and "HOLD FULL"
+            vaporStage=not chainEnabled.vapor and "DISABLED"
+                or (
+                    type(config.waterVaporMachines) == "table"
+                    and #config.waterVaporMachines > 0
+                    and "RUN"
+                    or "BUFFER ONLY"
+                ),
+            acidStage=not chainEnabled.acid and "DISABLED"
+                or not chainEnabled.vapor and "HOLD VAPOR OFF"
+                or autoState.acidHold and "HOLD FULL"
                 or autoState.so3InputHold and "HOLD SULFUR TRIOXIDE"
                 or autoState.vaporHold and "HOLD VAPOR"
                 or "RUN",
@@ -496,11 +597,12 @@ end
 
 local function controlLoop()
     while true do
-        local _, action, targetMode = os.pullEvent("factory_sulfuric_control")
+        local _, action, arg1, arg2 = os.pullEvent("factory_sulfuric_control")
 
         if action == "toggle_mode" then
             operatingMode = operatingMode == "AUTO" and "MANUAL" or "AUTO"
             autoState.sleepHold = false
+
             if operatingMode == "AUTO" then
                 autoState.so2Hold = nil
                 autoState.so3Hold = nil
@@ -509,8 +611,19 @@ local function controlLoop()
             else
                 autoState.reason = "MANUAL"
             end
+
+        elseif action == "chain" and chainEnabled[arg1] ~= nil then
+            local enabled = arg2 == true
+            chainEnabled[arg1] = enabled
+
+            if not enabled then
+                setChainMode(arg1, config.stopMode)
+            elseif operatingMode == "MANUAL" then
+                setChainMode(arg1, "DISABLED")
+            end
+
         elseif operatingMode == "MANUAL" and action == "all" then
-            setAllMode(targetMode)
+            setAllMode(arg1)
         end
 
         local ok, fresh = pcall(collectData)
