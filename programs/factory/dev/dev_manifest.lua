@@ -1,5 +1,5 @@
 return {
-    version = "0.4.2-dev",
+    version = "0.5.0-dev",
 
     files = {
         { remote="programs/factory/core/contract.lua", localPath="/programs/factory/core/contract.lua" },
@@ -18,11 +18,20 @@ return {
         { remote="programs/factory/modules/h2o2/control_adapter.lua", localPath="/programs/factory/modules/h2o2/control_adapter.lua" },
         { remote="programs/factory/modules/h2o2/config.example.lua", localPath="/programs/factory/modules/h2o2/config.example.lua" },
 
+        { remote="programs/factory/modules/biofuel/definition.lua", localPath="/programs/factory/modules/biofuel/definition.lua" },
+        { remote="programs/factory/modules/biofuel/legacy_adapter.lua", localPath="/programs/factory/modules/biofuel/legacy_adapter.lua" },
+        { remote="programs/factory/modules/biofuel/config.example.lua", localPath="/programs/factory/modules/biofuel/config.example.lua" },
+
+        { remote="programs/factory/modules/hdpe/definition.lua", localPath="/programs/factory/modules/hdpe/definition.lua" },
+        { remote="programs/factory/modules/hdpe/legacy_adapter.lua", localPath="/programs/factory/modules/hdpe/legacy_adapter.lua" },
+        { remote="programs/factory/modules/hdpe/config.example.lua", localPath="/programs/factory/modules/hdpe/config.example.lua" },
+
         { remote="programs/factory/tools/core_v2_smoke_test.lua", localPath="/programs/factory/tools/core_v2_smoke_test.lua" },
         { remote="programs/factory/tools/ui_v2_smoke_test.lua", localPath="/programs/factory/tools/ui_v2_smoke_test.lua" },
         { remote="programs/factory/tools/h2o2_v2_smoke_test.lua", localPath="/programs/factory/tools/h2o2_v2_smoke_test.lua" },
         { remote="programs/factory/tools/h2o2_v2_live_test.lua", localPath="/programs/factory/tools/h2o2_v2_live_test.lua" },
         { remote="programs/factory/tools/h2o2_v2_control.lua", localPath="/programs/factory/tools/h2o2_v2_control.lua" },
+        { remote="programs/factory/tools/module_v2_live.lua", localPath="/programs/factory/tools/module_v2_live.lua" },
 
         { remote="programs/factory/dev/dev_updater.lua", localPath="/programs/factory/dev/dev_updater.lua" },
         { remote="programs/factory/dev/dev_manifest.lua", localPath="/programs/factory/dev/dev_manifest.lua" },
