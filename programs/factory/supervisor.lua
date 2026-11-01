@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.10.1"
+local PROGRAM_VERSION = "0.10.2"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -1442,6 +1442,26 @@ local function renderHdpe(now, module)
     end
 end
 
+local function drawSulfuricBar(y, label, fill, color)
+    fill = type(fill) == "number" and math.max(0, math.min(1, fill)) or 0
+
+    local labelX = 3
+    local barX = 22
+    local pctWidth = 7
+    local rightPadding = 2
+    local barWidth = math.max(8, width - barX - pctWidth - rightPadding)
+
+    writeAt(labelX, y, label, colors.white)
+
+    local filled = math.floor(barWidth * fill + 0.5)
+    writeAt(barX, y, string.rep(" ", barWidth), colors.white, colors.gray)
+    if filled > 0 then
+        writeAt(barX, y, string.rep(" ", filled), colors.black, color)
+    end
+
+    writeAt(barX + barWidth + 1, y, string.format("%5.1f%%", fill * 100), colors.white)
+end
+
 local function renderSulfuric(now, module)
     sulfuricModeBounds = nil
     sulfuricStartBounds = nil
@@ -1462,14 +1482,12 @@ local function renderSulfuric(now, module)
     local runtime,runtimeColor=runtimeState(module,false)
 
     writeAt(3,6,"RUNTIME : "..runtime,runtimeColor)
-    local runtimeDetail=runtimeDetailText(module)
-    if runtimeDetail then writeAt(math.max(24,width-24),6,runtimeDetail,colors.gray) end
 
-    drawH2O2Bar(8,"SULFUR DIOXIDE",ui.sulfurDioxideFill,colors.yellow)
-    drawH2O2Bar(10,"SULFUR TRIOXIDE",ui.sulfurTrioxideFill,colors.orange)
-    drawH2O2Bar(12,"WATER VAPOR",ui.waterVaporFill,colors.lightBlue)
-    drawH2O2Bar(14,"SULFURIC ACID",ui.sulfuricAcidFill,colors.lime)
-    drawH2O2Bar(16,"O2 SOURCE",ui.oxygenFill,colors.cyan)
+    drawSulfuricBar(8,"SULFUR DIOXIDE",ui.sulfurDioxideFill,colors.yellow)
+    drawSulfuricBar(10,"SULFUR TRIOXIDE",ui.sulfurTrioxideFill,colors.orange)
+    drawSulfuricBar(12,"WATER VAPOR",ui.waterVaporFill,colors.lightBlue)
+    drawSulfuricBar(14,"SULFURIC ACID",ui.sulfuricAcidFill,colors.lime)
+    drawSulfuricBar(16,"O2 SOURCE",ui.oxygenFill,colors.cyan)
 
     writeAt(3,18,"STAGES",colors.cyan)
     writeAt(5,19,"SULFUR DIOXIDE  : "..tostring(ui.so2Stage or "N/A"),
