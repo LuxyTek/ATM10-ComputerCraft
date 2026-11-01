@@ -31,4 +31,8 @@ return {
         label = "BIOFUEL",
         type = "process",
     },
+
+    remoteControl = {
+        enabled = true,
+    },
 }
