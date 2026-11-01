@@ -88,10 +88,32 @@ Critere final : comportement identique a la baseline.
 
 ## LOT 5 - Modules simples
 
-Migrer :
+**Etat : couche V2 + controle distant implementes, validation en jeu restante.**
+
+Modules migres :
 
 1. Biofuel ;
 2. HDPE.
+
+Pour chaque module :
+
+- definition Contract V2 ;
+- adaptateur du statut legacy vers V2 ;
+- integration dans le viewer/controleur LIVE generique ;
+- controle distant confirme via `factory.control.v2` ;
+- refus des commandes manuelles tant que le runtime est en AUTO.
+
+Le viewer generique est :
+
+```text
+/programs/factory/tools/module_v2_live.lua
+```
+
+Il charge dynamiquement `modules/<id>/definition.lua` et
+`modules/<id>/legacy_adapter.lua`.
+
+Validation restante : comparer les valeurs LIVE avec le Supervisor V1 puis
+tester AUTO/MANUAL et START/STOP sur Biofuel et HDPE.
 
 ## LOT 6 - Ethene
 
