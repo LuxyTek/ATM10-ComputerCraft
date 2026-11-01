@@ -663,10 +663,15 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfur
 
             -- Extend the O2 bus to the right-side branch.
             if sulfuricBranchX > o2DropX then
-                for x = o2DropX + 1, sulfuricBranchX do
+                for x = o2DropX + 1, sulfuricBranchX - 1 do
                     writeAt(x, o2Y, "-", sulfuricO2Color)
                 end
             end
+
+            -- Shared-bus junctions: one branch drops to HDPE, the other
+            -- continues down the far-right margin toward Sulfuric Acid.
+            writeAt(o2DropX, o2Y, "+", sulfuricO2Color)
+            writeAt(sulfuricBranchX, o2Y, "+", sulfuricO2Color)
 
             for y = o2Y + 1, sulfuricTurnY do
                 writeAt(sulfuricBranchX, y, "|", sulfuricO2Color)
@@ -680,11 +685,13 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfur
             writeAt(sulfuricPortX, sulfuricTurnY, "+", sulfuricO2Color)
 
             local o2Label = "O2 " .. flowPercent(sulfuricO2Fill)
-            local o2LabelX = math.max(
-                sulfuricPortX,
-                sulfuricBranchX - #o2Label - 1
+            writeAt(
+                math.max(2, sulfuricBranchX - #o2Label - 1),
+                sulfuricTurnY - 1,
+                o2Label,
+                sulfuricO2Color,
+                colors.black
             )
-            writeAt(o2LabelX, sulfuricTurnY, o2Label, sulfuricO2Color, colors.black)
             writeAt(sulfuricPortX, sulfuricY - 1, "v", sulfuricO2Color)
 
             -- Expose all four supervised buffers as official resources.
