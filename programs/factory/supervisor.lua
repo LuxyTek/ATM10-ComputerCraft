@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.11.1"
+local PROGRAM_VERSION = "0.12.0"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -112,14 +112,22 @@ local etheneNextBounds = nil
 local etheneLineBounds = {}
 local etheneMachineBounds = {}
 
+local hdpePage = "overview"
+local hdpeTabOverviewBounds = nil
+local hdpeTabMachinesBounds = nil
 local hdpeModeBounds = nil
 local hdpeStartBounds = nil
 local hdpeStopBounds = nil
+local hdpeMachineBounds = {}
 
+local sulfuricPage = "overview"
+local sulfuricTabOverviewBounds = nil
+local sulfuricTabMachinesBounds = nil
 local sulfuricModeBounds = nil
 local sulfuricStartBounds = nil
 local sulfuricStopBounds = nil
 local sulfuricChainBounds = {}
+local sulfuricMachineBounds = {}
 
 local updateConfirmUntil = 0
 local updateInProgress = false
@@ -1346,25 +1354,7 @@ local function renderEthene(now, module)
     ),colors.yellow)
 
     local substrateTotal=tonumber(ui.substrateBufferCount or ui.substrateTotal) or 0
-    local substrateCapacity=tonumber(ui.substrateBufferCapacity) or 0
-    local substrateFill=ui.substrateBufferFill
-    local substrateColor=
-        type(substrateFill)=="number" and substrateFill>=0.95 and colors.orange
-        or colors.lightGray
-
-    local substrateText
-    if substrateCapacity>0 then
-        substrateText=("%s / %s (%s)"):format(
-            tostring(substrateTotal),
-            tostring(substrateCapacity),
-            type(substrateFill)=="number"
-                and string.format("%.1f%%",substrateFill*100)
-                or "N/A"
-        )
-    else
-        substrateText=tostring(substrateTotal)
-    end
-    writeAt(3,16,"SUB BUFFER: "..substrateText,substrateColor)
+    writeAt(3,16,"SUBSTRATE BUFFER: "..tostring(substrateTotal),colors.lightGray)
 
     local conversionState=tostring(ui.conversionState or "N/A")
     if ui.conversionHold then conversionState="HOLD" end
@@ -1436,8 +1426,8 @@ local function sendEtheneControl(action,target,targetMode)
     os.queueEvent("factory_ethene_control",action,target or "",targetMode)
 end
 
-local function sendHdpeControl(action,targetMode)
-    os.queueEvent("factory_hdpe_control",action,targetMode)
+local function sendHdpeControl(action,arg1,arg2)
+    os.queueEvent("factory_hdpe_control",action,arg1,arg2)
 end
 
 local function sendSulfuricControl(action,arg1,arg2)
@@ -1445,13 +1435,22 @@ local function sendSulfuricControl(action,arg1,arg2)
 end
 
 local function renderHdpe(now, module)
+    hdpeTabOverviewBounds = nil
+    hdpeTabMachinesBounds = nil
+    hdpeTabOverviewBounds = nil
+    hdpeTabMachinesBounds = nil
     hdpeModeBounds = nil
     hdpeStartBounds = nil
     hdpeStopBounds = nil
+    hdpeMachineBounds = {}
+    sulfuricTabOverviewBounds = nil
+    sulfuricTabMachinesBounds = nil
     sulfuricModeBounds = nil
     sulfuricStartBounds = nil
     sulfuricStopBounds = nil
     sulfuricChainBounds = {}
+    sulfuricMachineBounds = {}
+    hdpeMachineBounds = {}
 
     local backLabel = "[ < MODULES ]"
     writeAt(2,2,backLabel,colors.white,colors.gray)
@@ -1459,12 +1458,83 @@ local function renderHdpe(now, module)
 
     centered(1,"FACTORY HDPE  v"..tostring(module.version or "?"),colors.cyan)
 
-    centered(4,module.health=="FAULT" and "SYSTEME INCOMPLET" or "SYSTEME ONLINE",
-        module.health=="FAULT" and colors.red or healthColor(module.health))
-    centered(5,"PROCESS : "..tostring(module.state or "?"),stateColor(module.state))
+    local overviewLabel="[ OVERVIEW ]"
+    local machinesLabel="[ MACHINES ]"
+    writeAt(18,3,overviewLabel,colors.white,hdpePage=="overview" and colors.blue or colors.gray)
+    hdpeTabOverviewBounds={x1=18,x2=18+#overviewLabel-1,y1=3,y2=3}
+    local tx=18+#overviewLabel+2
+    writeAt(tx,3,machinesLabel,colors.white,hdpePage=="machines" and colors.blue or colors.gray)
+    hdpeTabMachinesBounds={x1=tx,x2=tx+#machinesLabel-1,y1=3,y2=3}
 
     local ui=type(module.ui)=="table" and module.ui or {}
     local mode=tostring(module.mode or "AUTO")
+
+    if hdpePage=="machines" then
+        centered(5,"CONTROLE MACHINES",colors.cyan)
+
+        local machines=type(ui.machines)=="table" and ui.machines or {}
+        local y=7
+
+        if #machines==0 then
+            centered(8,"AUCUNE MACHINE",colors.orange)
+        end
+
+        for _,machine in ipairs(machines) do
+            local state=tostring(machine.state or "?")
+            local kind=tostring(machine.kind or "MACHINE")
+
+            writeAt(3,y,kind,colors.cyan)
+            writeAt(10,y,shortName(machine.name,math.max(14,width-40)),colors.white)
+            writeAt(math.max(38,width-18),y,state,stateColor(state))
+
+            if mode=="AUTO" then
+                writeAt(width-9,y,"[ AUTO ]",colors.lightGray,colors.gray)
+            else
+                local running=state=="RUN"
+                local label=running and "[ STOP ]" or "[ START ]"
+                local bx=width-#label-1
+                writeAt(
+                    bx,y,label,
+                    running and colors.white or colors.black,
+                    running and colors.red or colors.lime
+                )
+                hdpeMachineBounds[#hdpeMachineBounds+1]={
+                    x1=bx,x2=bx+#label-1,y1=y,y2=y,
+                    name=machine.name,
+                    targetMode=running and "HIGH" or "DISABLED",
+                }
+            end
+
+            writeAt(10,y+1,("SUB %s   LIQ %s   O2 %s"):format(
+                tostring(machine.substrateCount or 0),
+                machinePct(machine.liquidEtheneFill),
+                machinePct(machine.oxygenFill)
+            ),colors.lightGray)
+
+            local energyText="ENERGY N/A"
+            if type(machine.energy)=="number" and type(machine.maxEnergy)=="number" then
+                energyText=("ENERGY %s / %s"):format(
+                    compact(machine.energy," FE"),
+                    compact(machine.maxEnergy," FE")
+                )
+            end
+            writeAt(10,y+2,energyText,colors.gray)
+            writeAt(10,y+3,"USAGE "..compact(machine.energyUsage," FE/t"),colors.gray)
+
+            y=y+5
+        end
+
+        if mode=="AUTO" then
+            writeAt(3,height-2,"AUTO ACTIF - CONTROLES MACHINES VERROUILLES",colors.lightGray)
+        else
+            writeAt(3,height-2,"MANUAL - CONTROLE MACHINE INDIVIDUEL",colors.yellow)
+        end
+        return
+    end
+
+    centered(4,module.health=="FAULT" and "SYSTEME INCOMPLET" or "SYSTEME ONLINE",
+        module.health=="FAULT" and colors.red or healthColor(module.health))
+    centered(5,"PROCESS : "..tostring(module.state or "?"),stateColor(module.state))
 
     local runtime,runtimeColor=runtimeState(module,false)
     writeAt(3,6,"RUNTIME : "..runtime,runtimeColor)
@@ -1564,10 +1634,13 @@ local function drawSulfuricBar(y, label, fill, color)
 end
 
 local function renderSulfuric(now, module)
+    sulfuricTabOverviewBounds = nil
+    sulfuricTabMachinesBounds = nil
     sulfuricModeBounds = nil
     sulfuricStartBounds = nil
     sulfuricStopBounds = nil
     sulfuricChainBounds = {}
+    sulfuricMachineBounds = {}
 
     local backLabel = "[ < MODULES ]"
     writeAt(2,2,backLabel,colors.white,colors.gray)
@@ -1575,14 +1648,79 @@ local function renderSulfuric(now, module)
 
     centered(1,"FACTORY SULFURIC ACID  v"..tostring(module.version or "?"),colors.cyan)
 
+    local overviewLabel="[ OVERVIEW ]"
+    local machinesLabel="[ MACHINES ]"
+    writeAt(18,3,overviewLabel,colors.white,sulfuricPage=="overview" and colors.blue or colors.gray)
+    sulfuricTabOverviewBounds={x1=18,x2=18+#overviewLabel-1,y1=3,y2=3}
+    local tx=18+#overviewLabel+2
+    writeAt(tx,3,machinesLabel,colors.white,sulfuricPage=="machines" and colors.blue or colors.gray)
+    sulfuricTabMachinesBounds={x1=tx,x2=tx+#machinesLabel-1,y1=3,y2=3}
+
+    local ui=type(module.ui)=="table" and module.ui or {}
+    local mode=tostring(module.mode or "AUTO")
+
+    if sulfuricPage=="machines" then
+        centered(5,"CONTROLE MACHINES",colors.cyan)
+
+        local machines=type(ui.machines)=="table" and ui.machines or {}
+        local y=7
+
+        if #machines==0 then
+            centered(8,"AUCUNE MACHINE",colors.orange)
+        end
+
+        for _,machine in ipairs(machines) do
+            local state=tostring(machine.state or "?")
+            local kind=tostring(machine.kind or "MACHINE")
+
+            writeAt(3,y,kind,colors.cyan)
+            writeAt(18,y,shortName(machine.name,math.max(14,width-48)),colors.white)
+            writeAt(math.max(42,width-18),y,state,stateColor(state))
+
+            if mode=="AUTO" then
+                writeAt(width-9,y,"[ AUTO ]",colors.lightGray,colors.gray)
+            else
+                local running=state=="RUN"
+                local label=running and "[ STOP ]" or "[ START ]"
+                local bx=width-#label-1
+                writeAt(
+                    bx,y,label,
+                    running and colors.white or colors.black,
+                    running and colors.red or colors.lime
+                )
+                sulfuricMachineBounds[#sulfuricMachineBounds+1]={
+                    x1=bx,x2=bx+#label-1,y1=y,y2=y,
+                    name=machine.name,
+                    targetMode=running and "HIGH" or "DISABLED",
+                }
+            end
+
+            local energyText="ENERGY N/A"
+            if type(machine.energy)=="number" and type(machine.maxEnergy)=="number" then
+                energyText=("ENERGY %s / %s"):format(
+                    compact(machine.energy," FE"),
+                    compact(machine.maxEnergy," FE")
+                )
+            end
+            writeAt(18,y+1,energyText,colors.gray)
+            writeAt(18,y+2,"USAGE "..compact(machine.energyUsage," FE/t"),colors.gray)
+
+            y=y+4
+        end
+
+        if mode=="AUTO" then
+            writeAt(3,height-2,"AUTO ACTIF - CONTROLES MACHINES VERROUILLES",colors.lightGray)
+        else
+            writeAt(3,height-2,"MANUAL - CONTROLE MACHINE INDIVIDUEL",colors.yellow)
+        end
+        return
+    end
+
     centered(4,module.health=="FAULT" and "SYSTEME INCOMPLET" or "SYSTEME ONLINE",
         module.health=="FAULT" and colors.red or healthColor(module.health))
     centered(5,"PROCESS : "..tostring(module.state or "?"),stateColor(module.state))
 
-    local ui=type(module.ui)=="table" and module.ui or {}
-    local mode=tostring(module.mode or "AUTO")
     local runtime,runtimeColor=runtimeState(module,false)
-
     writeAt(3,6,"RUNTIME : "..runtime,runtimeColor)
 
     local function stageColor(stage)
@@ -1611,20 +1749,14 @@ local function renderSulfuric(now, module)
 
         writeAt(sx,y,stateText,stateColorValue)
         writeAt(
-            bx,
-            y,
-            actionLabel,
+            bx,y,actionLabel,
             enabled and colors.white or colors.black,
             enabled and colors.red or colors.lime
         )
 
         sulfuricChainBounds[#sulfuricChainBounds+1]={
-            x1=bx,
-            x2=bx+#actionLabel-1,
-            y1=y,
-            y2=y,
-            id=id,
-            targetEnabled=not enabled,
+            x1=bx,x2=bx+#actionLabel-1,y1=y,y2=y,
+            id=id,targetEnabled=not enabled,
         }
     end
 
@@ -1643,9 +1775,7 @@ local function renderSulfuric(now, module)
         stageColor(ui.so3Stage))
 
     chainHeader(
-        17,
-        "vapor",
-        "WATER VAPOR",
+        17,"vapor","WATER VAPOR",
         ui.vaporEnabled~=false,
         ui.vaporPhysicalControl==true
     )
@@ -1929,6 +2059,8 @@ local function uiLoop()
                 selectedModuleId = nil
                 h2o2Page = "overview"
                 ethenePage = "overview"
+                hdpePage = "overview"
+                sulfuricPage = "overview"
 
             else
                 local handled = false
@@ -2041,7 +2173,13 @@ local function uiLoop()
                         end
                     end
                 elseif currentView == "detail" and selectedModuleId == "hdpe" then
-                    if inside(hdpeModeBounds,x,y) then
+                    if inside(hdpeTabOverviewBounds,x,y) then
+                        hdpePage="overview"
+                        handled=true
+                    elseif inside(hdpeTabMachinesBounds,x,y) then
+                        hdpePage="machines"
+                        handled=true
+                    elseif inside(hdpeModeBounds,x,y) then
                         sendHdpeControl("toggle_mode")
                         handled=true
                     elseif inside(hdpeStartBounds,x,y) then
@@ -2050,18 +2188,54 @@ local function uiLoop()
                     elseif inside(hdpeStopBounds,x,y) then
                         sendHdpeControl("prc","HIGH")
                         handled=true
+                    else
+                        for _,button in ipairs(hdpeMachineBounds) do
+                            if inside(button,x,y) then
+                                sendHdpeControl(
+                                    "machine",
+                                    button.name,
+                                    button.targetMode
+                                )
+                                handled=true
+                                break
+                            end
+                        end
                     end
 
                 elseif currentView == "detail" and selectedModuleId == "sulfuric" then
-                    for _,button in ipairs(sulfuricChainBounds) do
-                        if inside(button,x,y) then
-                            sendSulfuricControl(
-                                "chain",
-                                button.id,
-                                button.targetEnabled
-                            )
-                            handled=true
-                            break
+                    if inside(sulfuricTabOverviewBounds,x,y) then
+                        sulfuricPage="overview"
+                        handled=true
+                    elseif inside(sulfuricTabMachinesBounds,x,y) then
+                        sulfuricPage="machines"
+                        handled=true
+                    end
+
+                    if not handled then
+                        for _,button in ipairs(sulfuricMachineBounds) do
+                            if inside(button,x,y) then
+                                sendSulfuricControl(
+                                    "machine",
+                                    button.name,
+                                    button.targetMode
+                                )
+                                handled=true
+                                break
+                            end
+                        end
+                    end
+
+                    if not handled then
+                        for _,button in ipairs(sulfuricChainBounds) do
+                            if inside(button,x,y) then
+                                sendSulfuricControl(
+                                    "chain",
+                                    button.id,
+                                    button.targetEnabled
+                                )
+                                handled=true
+                                break
+                            end
                         end
                     end
 
