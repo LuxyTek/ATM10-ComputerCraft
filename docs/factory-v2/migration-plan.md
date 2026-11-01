@@ -16,14 +16,26 @@ Aucun comportement en jeu ne change.
 
 ## LOT 2 - Core minimal
 
-Creer :
+**Etat : code implemente, smoke test en jeu restant a executer.**
 
-- registry ;
-- loader ;
-- status/control bus V2 ;
-- compatibilite avec les statuts V1 si necessaire.
+Cree :
 
-Critere : le Core charge des definitions sans connaitre les modules par leur nom.
+- `core/contract.lua` ;
+- `core/loader.lua` ;
+- `core/registry.lua` ;
+- `core/status_adapter.lua` ;
+- `core/bus.lua` ;
+- `tools/core_v2_smoke_test.lua`.
+
+Le Core charge les definitions depuis `modules/<id>/definition.lua`, valide
+le Contract V2, construit les relations producteurs/consommateurs et accepte
+temporairement les statuts Contract V1 via un adaptateur.
+
+Critere structurel atteint : aucun nom de module industriel n'est code dans
+les fichiers du Core.
+
+Validation runtime restante : executer le smoke test sous CC:Tweaked avant
+de brancher le Supervisor V2 sur ce socle.
 
 ## LOT 3 - UI generique
 
