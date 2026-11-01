@@ -1,9 +1,10 @@
-local PROGRAM_VERSION = "0.4.2"
+local PROGRAM_VERSION = "0.4.3"
 local args = { ... }
 local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_biofuel.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
+local V2_REMOTE_BRIDGE_PATH = "/programs/factory/lib/v2_remote_bridge.lua"
 local UPDATE_MANIFEST = "programs/factory/biofuel_update_manifest.lua"
 
 local defaults = {
@@ -37,6 +38,10 @@ local defaults = {
         id = "biofuel",
         label = "BIOFUEL",
         type = "process",
+    },
+
+    remoteControl = {
+        enabled = true,
     },
 }
 
@@ -393,6 +398,7 @@ local function buildModuleStatus(data)
             outputCount = data.output.count,
             outputCapacity = config.outputCapacity,
             outputFill = ratio(data.output.count, config.outputCapacity),
+            crusherName = config.crusher,
             crusherState = data.crusherState,
             energy = data.energy,
             maxEnergy = data.maxEnergy,
@@ -692,6 +698,77 @@ local function dataLoop()
     end
 end
 
+local function v2RemoteControlLoop()
+    if not fs.exists(V2_REMOTE_BRIDGE_PATH) then
+        while true do sleep(60) end
+    end
+
+    local ok, bridge = pcall(dofile, V2_REMOTE_BRIDGE_PATH)
+    if not ok or type(bridge) ~= "table" or type(bridge.run) ~= "function" then
+        while true do sleep(60) end
+    end
+
+    local function handle(packet)
+        local action = packet.action
+        local args = type(packet.args) == "table" and packet.args or {}
+
+        if action == "module.set_mode" then
+            local targetMode = tostring(args.mode or "")
+            if targetMode ~= "AUTO" and targetMode ~= "MANUAL" then
+                return false, "INVALID MODE"
+            end
+
+            if operatingMode == targetMode then
+                return true, "ALREADY " .. targetMode
+            end
+
+            os.queueEvent("factory_biofuel_control", "toggle_mode")
+            return true, "MODE " .. targetMode .. " QUEUED"
+        end
+
+        if operatingMode ~= "MANUAL" then
+            return false, "MANUAL REQUIRED"
+        end
+
+        local startAction =
+            action == "module.start_all"
+            or action == "chain.start"
+            or action == "machine.start"
+
+        local stopAction =
+            action == "module.stop_all"
+            or action == "chain.stop"
+            or action == "machine.stop"
+
+        if not startAction and not stopAction then
+            return false, "UNSUPPORTED ACTION"
+        end
+
+        if action:find("^chain%.") and args.chainId ~= "biofuel" then
+            return false, "UNKNOWN CHAIN"
+        end
+
+        if action:find("^machine%.") and args.machineId ~= "crusher" then
+            return false, "UNKNOWN MACHINE"
+        end
+
+        local targetMode = startAction and "DISABLED" or config.stopMode
+        os.queueEvent("factory_biofuel_control", "crusher", targetMode)
+
+        return true, (startAction and "START" or "STOP") .. " CRUSHER QUEUED"
+    end
+
+    bridge.run({
+        target = "biofuel",
+        enabled = config.remoteControl.enabled,
+        getMode = function() return operatingMode end,
+        handle = handle,
+        onAccepted = function()
+            os.queueEvent("factory_module_wake", "biofuel", "V2_CONTROL")
+        end,
+    })
+end
+
 local function supervisorControlLoop()
     while true do
         local _, action, targetMode = os.pullEvent("factory_biofuel_control")
@@ -742,7 +819,18 @@ local function autoLoop()
 end
 
 if HEADLESS then
-    parallel.waitForAny(dataLoop, statusLoop, supervisorControlLoop, autoLoop)
+    parallel.waitForAny(
+        dataLoop,
+        statusLoop,
+        supervisorControlLoop,
+        autoLoop,
+        v2RemoteControlLoop
+    )
 else
-    parallel.waitForAny(uiLoop, dataLoop, statusLoop)
+    parallel.waitForAny(
+        uiLoop,
+        dataLoop,
+        statusLoop,
+        v2RemoteControlLoop
+    )
 end
