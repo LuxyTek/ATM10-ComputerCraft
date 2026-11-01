@@ -24,4 +24,8 @@ return {
         label = "HDPE",
         type = "process",
     },
+
+    remoteControl = {
+        enabled = true,
+    },
 }
