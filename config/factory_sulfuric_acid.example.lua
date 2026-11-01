@@ -10,6 +10,10 @@ return {
     },
     sulfurTrioxideInfuser = "chemicalInfuser_1",
     sulfuricAcidInfuser = "chemicalInfuser_2",
+
+    -- Fill these names once the Water Vapor pump / Condensentrator are
+    -- connected to the CC network. Empty means logical-only chain control.
+    waterVaporMachines = {},
     auto = {
         outputStop = 0.95,
         outputResume = 0.80,
