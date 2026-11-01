@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.9.8"
+local PROGRAM_VERSION = "0.10.0"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -9,6 +9,7 @@ local MODULE_PROGRAMS = {
     { id = "biofuel", path = "/programs/factory/biofuel.lua" },
     { id = "ethene", path = "/programs/factory/ethene.lua" },
     { id = "hdpe", path = "/programs/factory/hdpe.lua" },
+    { id = "sulfuric", path = "/programs/factory/sulfuric_acid.lua" },
 }
 
 local defaults = {
@@ -114,6 +115,10 @@ local etheneMachineBounds = {}
 local hdpeModeBounds = nil
 local hdpeStartBounds = nil
 local hdpeStopBounds = nil
+
+local sulfuricModeBounds = nil
+local sulfuricStartBounds = nil
+local sulfuricStopBounds = nil
 
 local updateConfirmUntil = 0
 local updateInProgress = false
@@ -1329,10 +1334,17 @@ local function sendHdpeControl(action,targetMode)
     os.queueEvent("factory_hdpe_control",action,targetMode)
 end
 
+local function sendSulfuricControl(action,targetMode)
+    os.queueEvent("factory_sulfuric_control",action,targetMode)
+end
+
 local function renderHdpe(now, module)
     hdpeModeBounds = nil
     hdpeStartBounds = nil
     hdpeStopBounds = nil
+    sulfuricModeBounds = nil
+    sulfuricStartBounds = nil
+    sulfuricStopBounds = nil
 
     local backLabel = "[ < MODULES ]"
     writeAt(2,2,backLabel,colors.white,colors.gray)
@@ -1427,6 +1439,84 @@ local function renderHdpe(now, module)
         local sx=3+#startLabel+2
         writeAt(sx,controlY,stopLabel,colors.white,colors.red)
         hdpeStopBounds={x1=sx,x2=sx+#stopLabel-1,y1=controlY,y2=controlY}
+    end
+end
+
+local function renderSulfuric(now, module)
+    sulfuricModeBounds = nil
+    sulfuricStartBounds = nil
+    sulfuricStopBounds = nil
+
+    local backLabel = "[ < MODULES ]"
+    writeAt(2,2,backLabel,colors.white,colors.gray)
+    backBounds={x1=2,x2=2+#backLabel-1,y1=2,y2=2}
+
+    centered(1,"FACTORY SULFURIC ACID  v"..tostring(module.version or "?"),colors.cyan)
+
+    centered(4,module.health=="FAULT" and "SYSTEME INCOMPLET" or "SYSTEME ONLINE",
+        module.health=="FAULT" and colors.red or healthColor(module.health))
+    centered(5,"PROCESS : "..tostring(module.state or "?"),stateColor(module.state))
+
+    local ui=type(module.ui)=="table" and module.ui or {}
+    local mode=tostring(module.mode or "AUTO")
+    local runtime,runtimeColor=runtimeState(module,false)
+
+    writeAt(3,6,"RUNTIME : "..runtime,runtimeColor)
+    local runtimeDetail=runtimeDetailText(module)
+    if runtimeDetail then writeAt(math.max(24,width-24),6,runtimeDetail,colors.gray) end
+
+    drawH2O2Bar(8,"SO2",ui.sulfurDioxideFill,colors.yellow)
+    drawH2O2Bar(10,"SO3",ui.sulfurTrioxideFill,colors.orange)
+    drawH2O2Bar(12,"WATER VAPOR",ui.waterVaporFill,colors.lightBlue)
+    drawH2O2Bar(14,"H2SO4",ui.sulfuricAcidFill,colors.lime)
+    drawH2O2Bar(16,"O2 SOURCE",ui.oxygenFill,colors.cyan)
+
+    writeAt(3,18,"STAGES",colors.cyan)
+    writeAt(5,19,"SO2      : "..tostring(ui.so2Stage or "N/A"),
+        stateColor(tostring(ui.so2Stage or "")))
+    writeAt(5,20,"SO3      : "..tostring(ui.so3Stage or "N/A"),
+        tostring(ui.so3Stage or ""):find("RUN",1,true) and colors.lime or colors.orange)
+    writeAt(5,21,"VAPOR    : "..tostring(ui.vaporStage or "N/A"),colors.lightGray)
+    writeAt(5,22,"H2SO4    : "..tostring(ui.acidStage or "N/A"),
+        tostring(ui.acidStage or ""):find("RUN",1,true) and colors.lime or colors.orange)
+
+    writeAt(3,24,("OUTPUT STOP %.0f%% / RESUME %.0f%%"):format(
+        (tonumber(ui.outputStop) or 0.95)*100,
+        (tonumber(ui.outputResume) or 0.80)*100
+    ),colors.gray)
+    writeAt(3,25,("INPUT HOLD %.0f%% / RESUME %.0f%%"):format(
+        (tonumber(ui.inputStop) or 0.10)*100,
+        (tonumber(ui.inputResume) or 0.20)*100
+    ),colors.gray)
+
+    local modeY=math.max(27,height-7)
+    writeAt(3,modeY,"MODE :",colors.lightGray)
+    writeAt(10,modeY,mode,modeColor(mode))
+
+    local modeLabel=mode=="AUTO" and "[ MANUAL ]" or "[ AUTO ]"
+    local mx=width-#modeLabel-1
+    writeAt(mx,modeY,modeLabel,colors.white,mode=="AUTO" and colors.blue or colors.lime)
+    sulfuricModeBounds={x1=mx,x2=mx+#modeLabel-1,y1=modeY,y2=modeY}
+
+    writeAt(3,modeY+2,"STATUS :",colors.gray)
+    local reason=tostring(module.reason or "-")
+    local reasonColor=colors.lightGray
+    if reason:find("FAULT",1,true) then reasonColor=colors.red
+    elseif reason:find("WAIT",1,true) or reason:find("FULL",1,true) then reasonColor=colors.orange
+    elseif reason:find("PRODUCTION",1,true) then reasonColor=colors.lime end
+    writeAt(12,modeY+2,reason,reasonColor)
+
+    local controlY=height-2
+    if mode=="AUTO" then
+        writeAt(3,controlY,"AUTO ACTIF - CONTROLES MANUELS VERROUILLES",colors.lightGray)
+    else
+        local startLabel="[ START ALL ]"
+        local stopLabel="[ STOP ALL ]"
+        writeAt(3,controlY,startLabel,colors.black,colors.lime)
+        sulfuricStartBounds={x1=3,x2=3+#startLabel-1,y1=controlY,y2=controlY}
+        local sx=3+#startLabel+2
+        writeAt(sx,controlY,stopLabel,colors.white,colors.red)
+        sulfuricStopBounds={x1=sx,x2=sx+#stopLabel-1,y1=controlY,y2=controlY}
     end
 end
 
@@ -1538,6 +1628,8 @@ render = function()
         renderEthene(now, modules.ethene)
     elseif currentView == "detail" and selectedModuleId == "hdpe" and modules.hdpe then
         renderHdpe(now, modules.hdpe)
+    elseif currentView == "detail" and selectedModuleId == "sulfuric" and modules.sulfuric then
+        renderSulfuric(now, modules.sulfuric)
     elseif currentView == "detail" then
         renderDetail(now)
     else
@@ -1622,6 +1714,10 @@ end
 
 local function moduleHdpeLoop()
     runModuleProcess(MODULE_PROGRAMS[4])
+end
+
+local function moduleSulfuricLoop()
+    runModuleProcess(MODULE_PROGRAMS[5])
 end
 
 local function uiLoop()
@@ -1765,6 +1861,18 @@ local function uiLoop()
                         handled=true
                     end
 
+                elseif currentView == "detail" and selectedModuleId == "sulfuric" then
+                    if inside(sulfuricModeBounds,x,y) then
+                        sendSulfuricControl("toggle_mode")
+                        handled=true
+                    elseif inside(sulfuricStartBounds,x,y) then
+                        sendSulfuricControl("all","DISABLED")
+                        handled=true
+                    elseif inside(sulfuricStopBounds,x,y) then
+                        sendSulfuricControl("all","HIGH")
+                        handled=true
+                    end
+
                 end
 
                 if not handled and inside(updateBounds, x, y) and not updateInProgress then
@@ -1788,4 +1896,4 @@ local function refreshLoop()
     end
 end
 
-parallel.waitForAny(statusLoop, uiLoop, refreshLoop, moduleH2O2Loop, moduleBiofuelLoop, moduleEtheneLoop, moduleHdpeLoop)
+parallel.waitForAny(statusLoop, uiLoop, refreshLoop, moduleH2O2Loop, moduleBiofuelLoop, moduleEtheneLoop, moduleHdpeLoop, moduleSulfuricLoop)
