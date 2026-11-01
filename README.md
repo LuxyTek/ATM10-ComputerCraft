@@ -1,5 +1,18 @@
 # ATM10-ComputerCraft
 
+> [!IMPORTANT]
+> **Factory Control V2 refactor**
+>
+> Cette branche (`refactor/factory-v2`) est la refonte modulaire de Factory Control.
+> La baseline fonctionnelle avant refonte est gelee dans
+> `backup/factory-v0.12.2-pre-refactor`.
+>
+> Commencer par : `docs/factory-v2/README.md`.
+>
+> Les anciens scripts Factory restent volontairement presents pendant la migration :
+> aucun fichier legacy ne doit etre considere comme supprime ou remplace tant que son
+> equivalent V2 n'a pas ete valide en jeu.
+
 Dashboard de supervision CC:Tweaked pour All The Mods 10 (Minecraft 1.21.1).
 
 ## Version operationnelle
