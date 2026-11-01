@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.10.0"
+local PROGRAM_VERSION = "0.10.1"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -1465,19 +1465,19 @@ local function renderSulfuric(now, module)
     local runtimeDetail=runtimeDetailText(module)
     if runtimeDetail then writeAt(math.max(24,width-24),6,runtimeDetail,colors.gray) end
 
-    drawH2O2Bar(8,"SO2",ui.sulfurDioxideFill,colors.yellow)
-    drawH2O2Bar(10,"SO3",ui.sulfurTrioxideFill,colors.orange)
+    drawH2O2Bar(8,"SULFUR DIOXIDE",ui.sulfurDioxideFill,colors.yellow)
+    drawH2O2Bar(10,"SULFUR TRIOXIDE",ui.sulfurTrioxideFill,colors.orange)
     drawH2O2Bar(12,"WATER VAPOR",ui.waterVaporFill,colors.lightBlue)
-    drawH2O2Bar(14,"H2SO4",ui.sulfuricAcidFill,colors.lime)
+    drawH2O2Bar(14,"SULFURIC ACID",ui.sulfuricAcidFill,colors.lime)
     drawH2O2Bar(16,"O2 SOURCE",ui.oxygenFill,colors.cyan)
 
     writeAt(3,18,"STAGES",colors.cyan)
-    writeAt(5,19,"SO2      : "..tostring(ui.so2Stage or "N/A"),
+    writeAt(5,19,"SULFUR DIOXIDE  : "..tostring(ui.so2Stage or "N/A"),
         stateColor(tostring(ui.so2Stage or "")))
-    writeAt(5,20,"SO3      : "..tostring(ui.so3Stage or "N/A"),
+    writeAt(5,20,"SULFUR TRIOXIDE : "..tostring(ui.so3Stage or "N/A"),
         tostring(ui.so3Stage or ""):find("RUN",1,true) and colors.lime or colors.orange)
     writeAt(5,21,"VAPOR    : "..tostring(ui.vaporStage or "N/A"),colors.lightGray)
-    writeAt(5,22,"H2SO4    : "..tostring(ui.acidStage or "N/A"),
+    writeAt(5,22,"SULFURIC ACID   : "..tostring(ui.acidStage or "N/A"),
         tostring(ui.acidStage or ""):find("RUN",1,true) and colors.lime or colors.orange)
 
     writeAt(3,24,("OUTPUT STOP %.0f%% / RESUME %.0f%%"):format(
