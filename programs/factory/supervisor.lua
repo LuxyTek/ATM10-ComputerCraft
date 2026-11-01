@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.10.3"
+local PROGRAM_VERSION = "0.10.4"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -460,7 +460,7 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfur
     local bioY = 21
     local etheneY = 13
     local hdpeY = 13
-    local sulfuricY = 23
+    local sulfuricY = 6
 
     renderFlowNode(now, h2o2, leftX, h2Y, nodeWidth)
     renderFlowNode(now, biofuel, leftX, bioY, nodeWidth)
@@ -474,10 +474,10 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfur
     local sulfuricRendered =
         sulfuric ~= nil
         and width >= 72
-        and height >= 36
+        and height >= 29
 
     if sulfuricRendered then
-        renderFlowNode(now, sulfuric, rightX, sulfuricY, nodeWidth)
+        renderFlowNode(now, sulfuric, centerX, sulfuricY, nodeWidth)
     end
 
     local h2Fill =
@@ -647,73 +647,11 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfur
         )
 
         if sulfuricRendered then
-            local sulfuricUi = type(sulfuric.ui) == "table" and sulfuric.ui or {}
-            local sulfuricO2Fill =
-                type(sulfuricUi.oxygenFill) == "number"
-                and sulfuricUi.oxygenFill
-                or o2Fill
-
-            local sulfuricO2Color = flowColor(h2o2, now, sulfuricO2Fill, 0.10, 0.20)
-
-            -- Reuse the upper O2 route as a shared bus. The Sulfuric branch
-            -- travels down the far-right margin so it never crosses HDPE.
-            local sulfuricBranchX = width - 1
-            local sulfuricPortX = topPortX(rightX, nodeWidth, "right")
-            local sulfuricTurnY = sulfuricY - 2
-
-            -- Extend the O2 bus to the right-side branch.
-            if sulfuricBranchX > o2DropX then
-                for x = o2DropX + 1, sulfuricBranchX - 1 do
-                    writeAt(x, o2Y, "-", sulfuricO2Color)
-                end
-            end
-
-            -- Shared-bus junctions: one branch drops to HDPE, the other
-            -- continues down the far-right margin toward Sulfuric Acid.
-            writeAt(o2DropX, o2Y, "+", sulfuricO2Color)
-            writeAt(sulfuricBranchX, o2Y, "+", sulfuricO2Color)
-
-            for y = o2Y + 1, sulfuricTurnY do
-                writeAt(sulfuricBranchX, y, "|", sulfuricO2Color)
-            end
-
-            -- Turn left just above the module, then enter from the top.
-            for x = sulfuricPortX, sulfuricBranchX - 1 do
-                writeAt(x, sulfuricTurnY, "-", sulfuricO2Color)
-            end
-            writeAt(sulfuricBranchX, sulfuricTurnY, "+", sulfuricO2Color)
-            writeAt(sulfuricPortX, sulfuricTurnY, "+", sulfuricO2Color)
-
-            local o2Label = "O2 " .. flowPercent(sulfuricO2Fill)
-            writeAt(
-                math.max(2, sulfuricBranchX - #o2Label - 1),
-                sulfuricTurnY - 1,
-                o2Label,
-                sulfuricO2Color,
-                colors.black
-            )
-            writeAt(sulfuricPortX, sulfuricY - 1, "v", sulfuricO2Color)
-
-            -- Expose all four supervised buffers as official resources.
-            local sulfurDioxideFill = sulfuricUi.sulfurDioxideFill
-            local sulfurTrioxideFill = sulfuricUi.sulfurTrioxideFill
-            local waterVaporFill = sulfuricUi.waterVaporFill
-            local sulfuricAcidFill = sulfuricUi.sulfuricAcidFill
-
-            local function resourceOutput(y, label, fill)
-                local resourceColor = flowColor(sulfuric, now, fill, 0.10, 0.20)
-                writeAt(
-                    math.max(2, rightX - 2),
-                    y,
-                    label .. " " .. flowPercent(fill) .. " ->",
-                    resourceColor
-                )
-            end
-
-            resourceOutput(sulfuricY + 8,  "SULFUR DIOXIDE",  sulfurDioxideFill)
-            resourceOutput(sulfuricY + 9,  "SULFUR TRIOXIDE", sulfurTrioxideFill)
-            resourceOutput(sulfuricY + 10, "WATER VAPOR",     waterVaporFill)
-            resourceOutput(sulfuricY + 11, "SULFURIC ACID",   sulfuricAcidFill)
+            -- Sulfuric Acid sits directly below the shared O2 bus.
+            -- Keep the marker outside the module frame; the detailed view
+            -- remains responsible for showing its four internal buffers.
+            local sulfuricPortX = topPortX(centerX, nodeWidth, "right")
+            writeAt(sulfuricPortX, o2Y, "v", o2Color)
         end
     else
         local liquidEtheneFill =
