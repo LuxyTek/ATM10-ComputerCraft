@@ -145,6 +145,20 @@ local args={...}
 local view=tostring(args[1] or "flow"):lower()
 local target=term.current()
 
+local display=tostring(args[2] or ""):lower()
+if display=="monitor" then
+    local found=peripheral.find("monitor")
+    if found then
+        target=found
+        pcall(target.setTextScale,0.5)
+    else
+        printError("Aucun monitor detecte, utilisation du terminal.")
+    end
+elseif args[2] and peripheral.isPresent(args[2]) and peripheral.hasType(args[2],"monitor") then
+    target=peripheral.wrap(args[2])
+    pcall(target.setTextScale,0.5)
+end
+
 if view=="overview" then
     overview.render(target,registry:get("process"),statuses.process,{
         allowChainControls=true,
@@ -157,8 +171,13 @@ end
 
 fs.delete(ROOT)
 
-term.setCursorPos(1,select(2,term.getSize()))
-term.setTextColor(colors.lightGray)
-term.setBackgroundColor(colors.black)
+if target~=term.current() then
+    print("Factory UI V2 smoke test affiche sur monitor.")
+    print("Vue: "..view)
+else
+    term.setCursorPos(1,select(2,term.getSize()))
+    term.setTextColor(colors.lightGray)
+    term.setBackgroundColor(colors.black)
+end
 
 return true
