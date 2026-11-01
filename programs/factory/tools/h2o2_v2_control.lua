@@ -17,13 +17,14 @@ local function openRednet()
 end
 
 local function getMonitor()
-    local monitor,name=peripheral.find("monitor",function(_,wrapped)
-        return wrapped~=nil
-    end)
-
-    if monitor then
-        pcall(monitor.setTextScale,0.5)
-        return monitor,name
+    for _,name in ipairs(peripheral.getNames()) do
+        if peripheral.hasType(name,"monitor") then
+            local monitor=peripheral.wrap(name)
+            if monitor then
+                pcall(monitor.setTextScale,0.5)
+                return monitor,name
+            end
+        end
     end
 
     return nil,nil
