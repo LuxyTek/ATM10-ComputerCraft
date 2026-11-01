@@ -1,9 +1,11 @@
-local PROGRAM_VERSION = "0.9.4"
+local PROGRAM_VERSION = "0.9.5"
 local args = { ... }
 local HEADLESS = args[1] == "--headless"
 local CONFIG_PATH = "/config/factory_h2o2.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
+local V2_CONTROL_PROTOCOL = "factory.control.v2"
+local V2_CONTROL_ACK_PROTOCOL = "factory.control.v2.ack"
 
 local defaults = {
     refreshSeconds = 1,
@@ -52,6 +54,10 @@ local defaults = {
         id = "h2o2",
         label = "H2/O2",
         type = "process",
+    },
+
+    remoteControl = {
+        enabled = true,
     },
 }
 
@@ -1943,6 +1949,173 @@ local function uiLoop()
     end
 end
 
+local function openRemoteRednet()
+    local opened = 0
+
+    for _, name in ipairs(peripheral.getNames()) do
+        if peripheral.hasType(name, "modem") then
+            if not rednet.isOpen(name) then
+                local ok = pcall(rednet.open, name)
+                if ok then opened = opened + 1 end
+            else
+                opened = opened + 1
+            end
+        end
+    end
+
+    return opened
+end
+
+local function sendV2ControlAck(sender, packet, ok, detail)
+    if type(sender) ~= "number" then return end
+
+    local ack = {
+        contract = 2,
+        target = "h2o2",
+        requestId = tostring(packet and packet.requestId or ""),
+        action = packet and packet.action or nil,
+        ok = ok == true,
+        detail = tostring(detail or ""),
+        mode = operatingMode,
+    }
+
+    pcall(rednet.send, sender, ack, V2_CONTROL_ACK_PROTOCOL)
+end
+
+local function logicalMachinePeripheral(machineId)
+    local lineNumber, kind =
+        tostring(machineId or ""):match("^line_(%d+)_(pump|separator)$")
+
+    if not lineNumber or not kind or not dataCache then return nil end
+
+    local wantedLine = "LINE " .. lineNumber
+    local wantedKind = kind == "pump" and "PUMP" or "SEP"
+
+    for _, machine in ipairs(dataCache.machines or {}) do
+        if machine.lineId == wantedLine and machine.kind == wantedKind then
+            return machine.name
+        end
+    end
+
+    return nil
+end
+
+local function queueV2Control(packet)
+    if type(packet) ~= "table"
+        or packet.contract ~= 2
+        or packet.target ~= "h2o2"
+        or type(packet.action) ~= "string" then
+        return false, "INVALID PACKET"
+    end
+
+    if packet.confirmed ~= true then
+        return false, "CONFIRMATION REQUIRED"
+    end
+
+    local action = packet.action
+    local args = type(packet.args) == "table" and packet.args or {}
+
+    if action == "module.set_mode" then
+        local targetMode = tostring(args.mode or "")
+        if targetMode ~= "AUTO" and targetMode ~= "MANUAL" then
+            return false, "INVALID MODE"
+        end
+
+        if operatingMode == targetMode then
+            return true, "ALREADY " .. targetMode
+        end
+
+        os.queueEvent("factory_h2o2_mode_toggle")
+        return true, "MODE " .. targetMode .. " QUEUED"
+    end
+
+    if operatingMode ~= "MANUAL" then
+        return false, "MANUAL REQUIRED"
+    end
+
+    if action == "module.start_all" then
+        os.queueEvent(
+            "factory_control_request",
+            "all",
+            "ALL",
+            "DISABLED",
+            "V2 START ALL"
+        )
+        return true, "START ALL QUEUED"
+
+    elseif action == "module.stop_all" then
+        os.queueEvent(
+            "factory_control_request",
+            "all",
+            "ALL",
+            config.stopMode,
+            "V2 STOP ALL"
+        )
+        return true, "STOP ALL QUEUED"
+
+    elseif action == "chain.start" or action == "chain.stop" then
+        local number = tostring(args.chainId or ""):match("^line_(%d+)$")
+        if not number then return false, "UNKNOWN CHAIN" end
+
+        local lineId = "LINE " .. number
+        local targetMode =
+            action == "chain.start" and "DISABLED" or config.stopMode
+
+        os.queueEvent(
+            "factory_control_request",
+            "line",
+            lineId,
+            targetMode,
+            "V2 " .. action:upper() .. " " .. lineId
+        )
+        return true, action:upper() .. " " .. lineId .. " QUEUED"
+
+    elseif action == "machine.start" or action == "machine.stop" then
+        local peripheralName = logicalMachinePeripheral(args.machineId)
+        if not peripheralName then
+            return false, "UNKNOWN MACHINE"
+        end
+
+        local targetMode =
+            action == "machine.start" and "DISABLED" or config.stopMode
+
+        os.queueEvent(
+            "factory_control_request",
+            "machine",
+            peripheralName,
+            targetMode,
+            "V2 " .. action:upper() .. " " .. tostring(args.machineId)
+        )
+        return true, action:upper() .. " QUEUED"
+    end
+
+    return false, "UNSUPPORTED ACTION"
+end
+
+local function remoteControlLoop()
+    if not config.remoteControl.enabled then
+        while true do sleep(60) end
+    end
+
+    openRemoteRednet()
+
+    while true do
+        local _, sender, packet, protocol = os.pullEvent("rednet_message")
+
+        if protocol == V2_CONTROL_PROTOCOL
+            and type(packet) == "table"
+            and packet.target == "h2o2" then
+
+            local ok, detail = queueV2Control(packet)
+            sendV2ControlAck(sender, packet, ok, detail)
+
+            if ok then
+                os.queueEvent("factory_module_wake", "h2o2", "V2_CONTROL")
+            end
+        end
+    end
+end
+
 local function controlLoop()
     while true do
         local _, scope, targetName, targetMode, label =
@@ -2121,7 +2294,21 @@ local function supervisorModeLoop()
 end
 
 if HEADLESS then
-    parallel.waitForAny(dataLoop, controlLoop, autoLoop, statusLoop, supervisorModeLoop)
+    parallel.waitForAny(
+        dataLoop,
+        controlLoop,
+        autoLoop,
+        statusLoop,
+        supervisorModeLoop,
+        remoteControlLoop
+    )
 else
-    parallel.waitForAny(uiLoop, dataLoop, controlLoop, autoLoop, statusLoop)
+    parallel.waitForAny(
+        uiLoop,
+        dataLoop,
+        controlLoop,
+        autoLoop,
+        statusLoop,
+        remoteControlLoop
+    )
 end
