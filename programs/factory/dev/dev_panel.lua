@@ -1,4 +1,4 @@
-local PANEL_VERSION="0.2.0"
+local PANEL_VERSION="0.3.0"
 local UPDATER_PATH="/programs/factory/dev/dev_updater.lua"
 local STARTUP_LAUNCHER="/startup_factory_v2_dev.lua"
 local STARTUP_PATH="/startup.lua"
@@ -107,6 +107,18 @@ local function render()
     button("h2liveoverview",18,y,"[ OVERVIEW ]",colors.black,colors.lime)
     button("h2livemachines",33,y,"[ MACHINES ]",colors.black,colors.lime)
     button("h2control",48,y,"[ CONTROL ]",colors.black,colors.orange)
+
+    y=y+3
+    writeAt(3,y,"BIOFUEL LIVE",colors.cyan)
+    button("bioliveoverview",18,y,"[ OVERVIEW ]",colors.black,colors.lime)
+    button("biolivemachines",33,y,"[ MACHINES ]",colors.black,colors.lime)
+    button("biocontrol",48,y,"[ CONTROL ]",colors.black,colors.orange)
+
+    y=y+3
+    writeAt(3,y,"HDPE LIVE",colors.cyan)
+    button("hdpeliveoverview",18,y,"[ OVERVIEW ]",colors.black,colors.lime)
+    button("hdpelivemachines",33,y,"[ MACHINES ]",colors.black,colors.lime)
+    button("hdpecontrol",48,y,"[ CONTROL ]",colors.black,colors.orange)
 
     y=y+4
     writeAt(3,y,"SYSTEME",colors.cyan)
@@ -339,6 +351,64 @@ while true do
             runInteractive(
                 "/programs/factory/tools/h2o2_v2_control.lua",
                 "monitor"
+            )
+
+        elseif inside(buttons.bioliveoverview,x,y) then
+            runScreenTest(
+                "BIOFUEL V2 - LIVE OVERVIEW",
+                "/programs/factory/tools/module_v2_live.lua",
+                "biofuel",
+                "overview",
+                "monitor",
+                "30"
+            )
+
+        elseif inside(buttons.biolivemachines,x,y) then
+            runScreenTest(
+                "BIOFUEL V2 - LIVE MACHINES",
+                "/programs/factory/tools/module_v2_live.lua",
+                "biofuel",
+                "machines",
+                "monitor",
+                "30"
+            )
+
+        elseif inside(buttons.biocontrol,x,y) then
+            runInteractive(
+                "/programs/factory/tools/module_v2_live.lua",
+                "biofuel",
+                "control",
+                "monitor",
+                "30"
+            )
+
+        elseif inside(buttons.hdpeliveoverview,x,y) then
+            runScreenTest(
+                "HDPE V2 - LIVE OVERVIEW",
+                "/programs/factory/tools/module_v2_live.lua",
+                "hdpe",
+                "overview",
+                "monitor",
+                "30"
+            )
+
+        elseif inside(buttons.hdpelivemachines,x,y) then
+            runScreenTest(
+                "HDPE V2 - LIVE MACHINES",
+                "/programs/factory/tools/module_v2_live.lua",
+                "hdpe",
+                "machines",
+                "monitor",
+                "30"
+            )
+
+        elseif inside(buttons.hdpecontrol,x,y) then
+            runInteractive(
+                "/programs/factory/tools/module_v2_live.lua",
+                "hdpe",
+                "control",
+                "monitor",
+                "30"
             )
 
         elseif inside(buttons.restore,x,y) then
