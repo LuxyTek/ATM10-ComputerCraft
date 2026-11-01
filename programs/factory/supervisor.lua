@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.11.0"
+local PROGRAM_VERSION = "0.11.1"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -1477,14 +1477,8 @@ local function renderHdpe(now, module)
 
     local substrateText = ui.substrateReadable == false
         and "N/A"
-        or ("%s / %s (%s)"):format(
-            tostring(ui.substrateCount or 0),
-            tostring(ui.substrateCapacity or "?"),
-            type(ui.substrateFill)=="number"
-                and string.format("%.1f%%",ui.substrateFill*100)
-                or "N/A"
-        )
-    writeAt(3,14,"SUB BUFFER: "..substrateText,colors.yellow)
+        or tostring(ui.substrateCount or 0)
+    writeAt(3,14,"SUBSTRATE INPUT: "..substrateText,colors.yellow)
     writeAt(3,15,"PRC RESERVE: "..tostring(ui.substratePrcReserve or 0),colors.gray)
 
     writeAt(3,17,"PRC",colors.cyan)
