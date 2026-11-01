@@ -1,5 +1,6 @@
-local PROGRAM_VERSION = "0.2.2"
+local PROGRAM_VERSION = "0.2.3"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
+local V2_REMOTE_BRIDGE_PATH = "/programs/factory/lib/v2_remote_bridge.lua"
 local CONFIG_PATH = "/config/factory_hdpe.lua"
 
 local defaults = {
@@ -27,6 +28,10 @@ local defaults = {
         id = "hdpe",
         label = "HDPE",
         type = "process",
+    },
+
+    remoteControl = {
+        enabled = true,
     },
 }
 
@@ -617,6 +622,77 @@ local function dataLoop()
     end
 end
 
+local function v2RemoteControlLoop()
+    if not fs.exists(V2_REMOTE_BRIDGE_PATH) then
+        while true do sleep(60) end
+    end
+
+    local ok, bridge = pcall(dofile, V2_REMOTE_BRIDGE_PATH)
+    if not ok or type(bridge) ~= "table" or type(bridge.run) ~= "function" then
+        while true do sleep(60) end
+    end
+
+    local function handle(packet)
+        local action = packet.action
+        local args = type(packet.args) == "table" and packet.args or {}
+
+        if action == "module.set_mode" then
+            local targetMode = tostring(args.mode or "")
+            if targetMode ~= "AUTO" and targetMode ~= "MANUAL" then
+                return false, "INVALID MODE"
+            end
+
+            if operatingMode == targetMode then
+                return true, "ALREADY " .. targetMode
+            end
+
+            os.queueEvent("factory_hdpe_control", "toggle_mode")
+            return true, "MODE " .. targetMode .. " QUEUED"
+        end
+
+        if operatingMode ~= "MANUAL" then
+            return false, "MANUAL REQUIRED"
+        end
+
+        local startAction =
+            action == "module.start_all"
+            or action == "chain.start"
+            or action == "machine.start"
+
+        local stopAction =
+            action == "module.stop_all"
+            or action == "chain.stop"
+            or action == "machine.stop"
+
+        if not startAction and not stopAction then
+            return false, "UNSUPPORTED ACTION"
+        end
+
+        if action:find("^chain%.") and args.chainId ~= "hdpe" then
+            return false, "UNKNOWN CHAIN"
+        end
+
+        if action:find("^machine%.") and args.machineId ~= "prc" then
+            return false, "UNKNOWN MACHINE"
+        end
+
+        local targetMode = startAction and "DISABLED" or config.stopMode
+        os.queueEvent("factory_hdpe_control", "prc", targetMode)
+
+        return true, (startAction and "START" or "STOP") .. " PRC QUEUED"
+    end
+
+    bridge.run({
+        target = "hdpe",
+        enabled = config.remoteControl.enabled,
+        getMode = function() return operatingMode end,
+        handle = handle,
+        onAccepted = function()
+            os.queueEvent("factory_module_wake", "hdpe", "V2_CONTROL")
+        end,
+    })
+end
+
 local function controlLoop()
     while true do
         local _, action, arg1, arg2 = os.pullEvent("factory_hdpe_control")
@@ -656,4 +732,9 @@ local function controlLoop()
     end
 end
 
-parallel.waitForAny(dataLoop, statusLoop, controlLoop)
+parallel.waitForAny(
+    dataLoop,
+    statusLoop,
+    controlLoop,
+    v2RemoteControlLoop
+)
