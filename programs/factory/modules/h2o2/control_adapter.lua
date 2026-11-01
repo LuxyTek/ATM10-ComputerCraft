@@ -39,6 +39,11 @@ function M.dispatch(packet,currentStatus)
         return true,"mode toggle queued"
     end
 
+    if tostring(type(currentStatus)=="table" and currentStatus.mode or "")
+        ~= "MANUAL" then
+        return false,"manual mode required"
+    end
+
     if action=="module.start_all" then
         os.queueEvent(
             "factory_control_request",
