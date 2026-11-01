@@ -1,0 +1,20 @@
+return {
+    stopMode="HIGH",
+
+    prc="pressurizedReactionChamber_4",
+    substrateBarrel="sophisticatedstorage:barrel_5",
+    substrateItem="mekanism:substrate",
+    outputBarrel="sophisticatedstorage:barrel_3",
+    outputCapacity=270336,
+
+    auto={
+        outputStop=0.95,
+        outputResume=0.80,
+    },
+
+    runtime={
+        activeSeconds=1,
+        idleSeconds=15,
+        sleepSeconds=600,
+    },
+}
