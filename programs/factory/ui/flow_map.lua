@@ -297,13 +297,29 @@ function M.render(target,registry,statuses,options)
     local w=widgets.new(target)
     if options.clear~=false then w:clear() end
 
-    w:centered(1,"FACTORY FLOW MAP V2",colors.cyan)
-
     local definitions=registry:list()
     local edges=registry:topology()
     local positions=M.layout(definitions,edges,w.width,w.height)
     local bounds={modules={}}
 
+    w:centered(
+        1,
+        ("FACTORY FLOW MAP V2.1   LINKS:%d"):format(#edges),
+        colors.cyan
+    )
+
+    for _,definition in ipairs(definitions) do
+        local pos=positions[definition.id]
+        if pos then
+            bounds.modules[definition.id]=drawNode(
+                w,pos.x,pos.y,pos.width,definition,statusFor(statuses,definition.id)
+            )
+        end
+    end
+
+    -- Draw topology links after nodes. Endpoints are placed one character
+    -- outside module borders, so routes stay visible without overwriting
+    -- module contents.
     local pairLane={}
     for _,edge in ipairs(edges) do
         local key=tostring(edge.from).."->"..tostring(edge.to)
@@ -316,16 +332,6 @@ function M.render(target,registry,statuses,options)
             edge,
             pairLane[key]
         )
-    end
-
-    -- Draw nodes after links so route segments never overwrite module content.
-    for _,definition in ipairs(definitions) do
-        local pos=positions[definition.id]
-        if pos then
-            bounds.modules[definition.id]=drawNode(
-                w,pos.x,pos.y,pos.width,definition,statusFor(statuses,definition.id)
-            )
-        end
     end
 
     return bounds
