@@ -651,7 +651,7 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfur
 
         if sulfuricRendered then
             local sulfuricUi = type(sulfuric.ui) == "table" and sulfuric.ui or {}
-            local sulfuricPortX = topPortX(centerX, nodeWidth, "right")
+            local sulfuricPortX = topPortX(centerX, nodeWidth, "left")
 
             -- Explicit second consumer on the shared O2 bus.
             writeAt(sulfuricPortX, o2Y, "+", o2Color)
