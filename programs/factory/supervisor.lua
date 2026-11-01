@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.10.4"
+local PROGRAM_VERSION = "0.10.5"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -456,17 +456,17 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfur
     local centerX = math.floor((width - nodeWidth) / 2) + 1
     local rightX = width - nodeWidth - 1
 
-    local h2Y = 7
-    local bioY = 21
-    local etheneY = 13
-    local hdpeY = 13
-    local sulfuricY = 6
+    local h2Y = 8
+    local bioY = 27
+    local etheneY = 19
+    local hdpeY = 19
+    local sulfuricY = 7
 
     renderFlowNode(now, h2o2, leftX, h2Y, nodeWidth)
     renderFlowNode(now, biofuel, leftX, bioY, nodeWidth)
     renderFlowNode(now, ethene, centerX, etheneY, nodeWidth)
 
-    local hdpeRendered = hdpe ~= nil and width >= 72 and height >= 29
+    local hdpeRendered = hdpe ~= nil and width >= 72 and height >= 35
     if hdpeRendered then
         renderFlowNode(now, hdpe, rightX, hdpeY, nodeWidth)
     end
@@ -474,7 +474,7 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfur
     local sulfuricRendered =
         sulfuric ~= nil
         and width >= 72
-        and height >= 29
+        and height >= 35
 
     if sulfuricRendered then
         renderFlowNode(now, sulfuric, centerX, sulfuricY, nodeWidth)
@@ -626,6 +626,9 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfur
             true
         )
 
+        -- The upper O2 line is a shared bus, not a single HDPE-only route.
+        writeAt(o2DropX, o2Y, "+", o2Color)
+
         for y = o2Y + 1, hdpeY - 2 do
             writeAt(o2DropX, y, "|", o2Color)
         end
@@ -647,11 +650,32 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfur
         )
 
         if sulfuricRendered then
-            -- Sulfuric Acid sits directly below the shared O2 bus.
-            -- Keep the marker outside the module frame; the detailed view
-            -- remains responsible for showing its four internal buffers.
+            local sulfuricUi = type(sulfuric.ui) == "table" and sulfuric.ui or {}
             local sulfuricPortX = topPortX(centerX, nodeWidth, "right")
-            writeAt(sulfuricPortX, o2Y, "v", o2Color)
+
+            -- Explicit second consumer on the shared O2 bus.
+            writeAt(sulfuricPortX, o2Y, "+", o2Color)
+            for y = o2Y + 1, sulfuricY - 2 do
+                writeAt(sulfuricPortX, y, "|", o2Color)
+            end
+            writeAt(sulfuricPortX, sulfuricY - 1, "v", o2Color)
+
+            -- Official Sulfuric-module output resources. They sit in the
+            -- dedicated gap between SULFURIC ACID and ETHENE.
+            local function sulfuricOutput(y, label, fill)
+                local resourceColor = flowColor(sulfuric, now, fill, 0.10, 0.20)
+                writeAt(
+                    centerX,
+                    y,
+                    label .. " " .. flowPercent(fill) .. " ->",
+                    resourceColor
+                )
+            end
+
+            sulfuricOutput(sulfuricY + 7,  "SULFUR DIOXIDE",  sulfuricUi.sulfurDioxideFill)
+            sulfuricOutput(sulfuricY + 8,  "SULFUR TRIOXIDE", sulfuricUi.sulfurTrioxideFill)
+            sulfuricOutput(sulfuricY + 9,  "WATER VAPOR",     sulfuricUi.waterVaporFill)
+            sulfuricOutput(sulfuricY + 10, "SULFURIC ACID",   sulfuricUi.sulfuricAcidFill)
         end
     else
         local liquidEtheneFill =
@@ -684,7 +708,7 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfur
     end
 
     if #extras > 0 then
-        local extrasY = 30
+        local extrasY = 36
         if extrasY <= height - 2 then
             writeAt(2, extrasY, "OTHER MODULES", colors.cyan)
             local y = extrasY + 1
@@ -739,7 +763,7 @@ local function renderMap(now, list)
 
     local connectedLayoutFits =
         width >= 72
-        and height >= 29
+        and height >= 35
         and h2o2 ~= nil
         and biofuel ~= nil
         and ethene ~= nil
