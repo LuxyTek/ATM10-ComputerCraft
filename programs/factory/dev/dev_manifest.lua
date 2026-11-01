@@ -1,5 +1,5 @@
 return {
-    version = "0.4.1-dev",
+    version = "0.4.2-dev",
 
     files = {
         { remote="programs/factory/core/contract.lua", localPath="/programs/factory/core/contract.lua" },
