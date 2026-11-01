@@ -8,6 +8,7 @@ local M = {}
 
 M.STATUS_PROTOCOL = "factory.status.v2"
 M.CONTROL_PROTOCOL = "factory.control.v2"
+M.CONTROL_ACK_PROTOCOL = "factory.control.v2.ack"
 M.LEGACY_STATUS_PROTOCOL = "factory.status.v1"
 
 M.LOCAL_STATUS_EVENT = "factory_v2_status"
@@ -55,7 +56,7 @@ function M.broadcastStatus(packet)
     return ok == true, ok == true and nil or "rednet broadcast failed"
 end
 
-function M.makeControl(targetId, action, args)
+function M.makeControl(targetId, action, args, meta)
     if type(targetId) ~= "string" or targetId == "" then
         return nil, "targetId is required"
     end
@@ -63,16 +64,21 @@ function M.makeControl(targetId, action, args)
         return nil, "action is required"
     end
 
+    meta = type(meta) == "table" and meta or {}
+
     return {
         contract = 2,
         target = targetId,
         action = action,
         args = type(args) == "table" and args or {},
+        requestId = meta.requestId,
+        confirmed = meta.confirmed == true,
+        source = meta.source,
     }
 end
 
-function M.broadcastControl(targetId, action, args)
-    local packet, packetError = M.makeControl(targetId, action, args)
+function M.broadcastControl(targetId, action, args, meta)
+    local packet, packetError = M.makeControl(targetId, action, args, meta)
     if not packet then return false, packetError end
 
     os.queueEvent(M.LOCAL_CONTROL_EVENT, packet)
@@ -108,7 +114,16 @@ function M.parseEvent(event, p1, p2, p3)
         return nil, nil, sender, err
     end
 
-    if protocol == M.CONTROL_PROTOCOL then
+    if protocol == M.CONTROL_ACK_PROTOCOL then
+        if type(packet) == "table"
+            and packet.contract == 2
+            and type(packet.target) == "string"
+            and type(packet.requestId) == "string" then
+            return "control_ack", packet, sender
+        end
+        return nil, nil, sender, "invalid control ack"
+
+    elseif protocol == M.CONTROL_PROTOCOL then
         if type(packet) == "table"
             and packet.contract == 2
             and type(packet.target) == "string"
