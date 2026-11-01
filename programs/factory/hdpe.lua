@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.1.1"
+local PROGRAM_VERSION = "0.2.0"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 local CONFIG_PATH = "/config/factory_hdpe.lua"
 
@@ -6,8 +6,8 @@ local defaults = {
     stopMode = "HIGH",
 
     prc = "pressurizedReactionChamber_4",
-    substrateBarrel = "sophisticatedstorage:barrel_4",
-    substrateCapacity = 8650752,
+    substrateBarrel = "sophisticatedstorage:barrel_5",
+    substrateItem = "mekanism:substrate",
     outputBarrel = "sophisticatedstorage:barrel_3",
     outputCapacity = 270336,
 
@@ -162,6 +162,44 @@ local function summarizeBarrel(name)
     }
 end
 
+local function summarizeItem(name, itemId)
+    if not peripheral.isPresent(name) then
+        return {
+            present=false,
+            readable=false,
+            count=0,
+            itemName=itemId,
+        }
+    end
+
+    local dev = peripheral.wrap(name)
+    local items = safeCall(dev, "list")
+
+    if type(items) ~= "table" then
+        return {
+            present=true,
+            readable=false,
+            count=0,
+            itemName=itemId,
+        }
+    end
+
+    local total = 0
+    for _, item in pairs(items) do
+        if type(item) == "table"
+            and item.name == itemId then
+            total = total + (tonumber(item.count) or 0)
+        end
+    end
+
+    return {
+        present=true,
+        readable=true,
+        count=total,
+        itemName=itemId,
+    }
+end
+
 local function readPrc()
     if not peripheral.isPresent(config.prc) then
         return {
@@ -230,13 +268,15 @@ end
 
 local function collectData()
     local prc = readPrc()
-    local substrateBuffer = summarizeBarrel(config.substrateBarrel)
+    local substrateBuffer = summarizeItem(
+        config.substrateBarrel,
+        config.substrateItem
+    )
     local output = summarizeBarrel(config.outputBarrel)
 
     return {
         prc=prc,
         substrateBuffer=substrateBuffer,
-        substrateBufferFill=ratio(substrateBuffer.count, config.substrateCapacity),
         output=output,
         outputFill=ratio(output.count, config.outputCapacity),
         online=prc.present and substrateBuffer.present and output.present,
@@ -354,7 +394,6 @@ local function healthState(data)
     end
 
     if data.output.mixed
-        or data.substrateBuffer.mixed
         or data.substrateBuffer.readable == false then
         return "WARN"
     end
@@ -371,10 +410,8 @@ local function buildModuleStatus(data)
     if data.output.mixed then
         table.insert(alarms, "OUTPUT BUFFER MIXED")
     end
-    if data.substrateBuffer.mixed then
-        table.insert(alarms, "SUBSTRATE BUFFER MIXED")
-    elseif data.substrateBuffer.readable == false then
-        table.insert(alarms, "SUBSTRATE BUFFER UNREADABLE")
+    if data.substrateBuffer.readable == false then
+        table.insert(alarms, "INPUT BUFFER UNREADABLE")
     end
     if data.prc.state == "UNKNOWN" or data.prc.state == "WARN" then
         table.insert(alarms, "PRC CONTROL STATE")
@@ -409,7 +446,7 @@ local function buildModuleStatus(data)
             hdpe=outputFill,
             liquidEthene=data.prc.liquidEtheneFill,
             oxygen=data.prc.oxygenFill,
-            substrate=data.substrateBufferFill,
+            substrateCount=data.substrateBuffer.count,
         },
 
         ui={
@@ -419,8 +456,7 @@ local function buildModuleStatus(data)
             substrateReadable=data.substrateBuffer.readable,
             substrateCount=data.substrateBuffer.count,
             substrateName=data.substrateBuffer.itemName,
-            substrateCapacity=config.substrateCapacity,
-            substrateFill=data.substrateBufferFill,
+            substrateBarrel=config.substrateBarrel,
             substratePrcReserve=data.prc.substrateCount,
 
             liquidEtheneReadable=data.prc.liquidEtheneReadable,
@@ -452,10 +488,7 @@ local function buildModuleStatus(data)
             {
                 label="SUBSTRATE",
                 value=data.substrateBuffer.readable
-                    and ("%d / %d"):format(
-                        tonumber(data.substrateBuffer.count) or 0,
-                        config.substrateCapacity
-                    )
+                    and tostring(tonumber(data.substrateBuffer.count) or 0)
                     or "N/A",
             },
             {
