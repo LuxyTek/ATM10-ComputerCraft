@@ -1,5 +1,5 @@
 return {
-    version = "0.12.3",
+    version = "0.12.4",
 
     files = {
         {
@@ -29,6 +29,10 @@ return {
         {
             remote = "programs/factory/lib/status_bus.lua",
             localPath = "/programs/factory/lib/status_bus.lua",
+        },
+        {
+            remote = "programs/factory/lib/v2_remote_bridge.lua",
+            localPath = "/programs/factory/lib/v2_remote_bridge.lua",
         },
         {
             remote = "programs/factory/lib/updater.lua",
