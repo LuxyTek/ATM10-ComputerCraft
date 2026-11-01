@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.10.2"
+local PROGRAM_VERSION = "0.10.3"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -447,7 +447,7 @@ local function renderGenericMap(now, list)
     end
 end
 
-local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
+local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfuric)
     -- Fixed process topology with framed modules and explicit resource links.
     -- The three columns are intentionally kept stable so future modules can
     -- extend the graph without turning the map into a cable diagram.
@@ -460,6 +460,7 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
     local bioY = 21
     local etheneY = 13
     local hdpeY = 13
+    local sulfuricY = 23
 
     renderFlowNode(now, h2o2, leftX, h2Y, nodeWidth)
     renderFlowNode(now, biofuel, leftX, bioY, nodeWidth)
@@ -468,6 +469,15 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
     local hdpeRendered = hdpe ~= nil and width >= 72 and height >= 29
     if hdpeRendered then
         renderFlowNode(now, hdpe, rightX, hdpeY, nodeWidth)
+    end
+
+    local sulfuricRendered =
+        sulfuric ~= nil
+        and width >= 72
+        and height >= 36
+
+    if sulfuricRendered then
+        renderFlowNode(now, sulfuric, rightX, sulfuricY, nodeWidth)
     end
 
     local h2Fill =
@@ -635,6 +645,69 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
             "HDPE OUT " .. flowPercent(hdpeFill) .. " ->",
             outputColor
         )
+
+        if sulfuricRendered then
+            local sulfuricUi = type(sulfuric.ui) == "table" and sulfuric.ui or {}
+            local sulfuricO2Fill =
+                type(sulfuricUi.oxygenFill) == "number"
+                and sulfuricUi.oxygenFill
+                or o2Fill
+
+            local sulfuricO2Color = flowColor(h2o2, now, sulfuricO2Fill, 0.10, 0.20)
+
+            -- Reuse the upper O2 route as a shared bus. The Sulfuric branch
+            -- travels down the far-right margin so it never crosses HDPE.
+            local sulfuricBranchX = width - 1
+            local sulfuricPortX = topPortX(rightX, nodeWidth, "right")
+            local sulfuricTurnY = sulfuricY - 2
+
+            -- Extend the O2 bus to the right-side branch.
+            if sulfuricBranchX > o2DropX then
+                for x = o2DropX + 1, sulfuricBranchX do
+                    writeAt(x, o2Y, "-", sulfuricO2Color)
+                end
+            end
+
+            for y = o2Y + 1, sulfuricTurnY do
+                writeAt(sulfuricBranchX, y, "|", sulfuricO2Color)
+            end
+
+            -- Turn left just above the module, then enter from the top.
+            for x = sulfuricPortX, sulfuricBranchX - 1 do
+                writeAt(x, sulfuricTurnY, "-", sulfuricO2Color)
+            end
+            writeAt(sulfuricBranchX, sulfuricTurnY, "+", sulfuricO2Color)
+            writeAt(sulfuricPortX, sulfuricTurnY, "+", sulfuricO2Color)
+
+            local o2Label = "O2 " .. flowPercent(sulfuricO2Fill)
+            local o2LabelX = math.max(
+                sulfuricPortX,
+                sulfuricBranchX - #o2Label - 1
+            )
+            writeAt(o2LabelX, sulfuricTurnY, o2Label, sulfuricO2Color, colors.black)
+            writeAt(sulfuricPortX, sulfuricY - 1, "v", sulfuricO2Color)
+
+            -- Expose all four supervised buffers as official resources.
+            local sulfurDioxideFill = sulfuricUi.sulfurDioxideFill
+            local sulfurTrioxideFill = sulfuricUi.sulfurTrioxideFill
+            local waterVaporFill = sulfuricUi.waterVaporFill
+            local sulfuricAcidFill = sulfuricUi.sulfuricAcidFill
+
+            local function resourceOutput(y, label, fill)
+                local resourceColor = flowColor(sulfuric, now, fill, 0.10, 0.20)
+                writeAt(
+                    math.max(2, rightX - 2),
+                    y,
+                    label .. " " .. flowPercent(fill) .. " ->",
+                    resourceColor
+                )
+            end
+
+            resourceOutput(sulfuricY + 8,  "SULFUR DIOXIDE",  sulfurDioxideFill)
+            resourceOutput(sulfuricY + 9,  "SULFUR TRIOXIDE", sulfurTrioxideFill)
+            resourceOutput(sulfuricY + 10, "WATER VAPOR",     waterVaporFill)
+            resourceOutput(sulfuricY + 11, "SULFURIC ACID",   sulfuricAcidFill)
+        end
     else
         local liquidEtheneFill =
             type(ethene.ui) == "table" and ethene.ui.liquidEtheneFill
@@ -658,6 +731,7 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
             or module.id == "biofuel"
             or module.id == "ethene"
             or (hdpeRendered and module.id == "hdpe")
+            or (sulfuricRendered and module.id == "sulfuric")
 
         if not isCore then
             table.insert(extras, module)
@@ -716,6 +790,7 @@ local function renderMap(now, list)
     local biofuel = findModule(list, "biofuel")
     local ethene = findModule(list, "ethene")
     local hdpe = findModule(list, "hdpe")
+    local sulfuric = findModule(list, "sulfuric")
 
     local connectedLayoutFits =
         width >= 72
@@ -725,7 +800,7 @@ local function renderMap(now, list)
         and ethene ~= nil
 
     if connectedLayoutFits then
-        renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe)
+        renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfuric)
     else
         renderGenericMap(now, list)
     end
