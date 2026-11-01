@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.1.0"
+local PROGRAM_VERSION = "0.1.1"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 local CONFIG_PATH = "/config/factory_sulfuric_acid.lua"
 
@@ -296,22 +296,22 @@ local function applyAuto(data)
     )
 
     local reasons = {}
-    if autoState.so2Hold then table.insert(reasons, "SO2 FULL") end
+    if autoState.so2Hold then table.insert(reasons, "SULFUR DIOXIDE FULL") end
 
     if autoState.so3Hold then
-        table.insert(reasons, "SO3 FULL")
+        table.insert(reasons, "SULFUR TRIOXIDE FULL")
     elseif autoState.so2InputHold then
-        table.insert(reasons, "SO3 WAIT SO2")
+        table.insert(reasons, "SULFUR TRIOXIDE WAIT SULFUR DIOXIDE")
     elseif autoState.oxygenHold then
-        table.insert(reasons, "SO3 WAIT O2")
+        table.insert(reasons, "SULFUR TRIOXIDE WAIT O2")
     end
 
     if autoState.acidHold then
-        table.insert(reasons, "H2SO4 FULL")
+        table.insert(reasons, "SULFURIC ACID FULL")
     elseif autoState.so3InputHold then
-        table.insert(reasons, "H2SO4 WAIT SO3")
+        table.insert(reasons, "SULFURIC ACID WAIT SULFUR TRIOXIDE")
     elseif autoState.vaporHold then
-        table.insert(reasons, "H2SO4 WAIT VAPOR")
+        table.insert(reasons, "SULFURIC ACID WAIT WATER VAPOR")
     end
 
     autoState.reason = #reasons == 0 and "PRODUCTION" or table.concat(reasons, " | ")
@@ -402,12 +402,12 @@ local function buildModuleStatus(data)
             oxygenTankCount=data.oxygen.count,
             so2Stage=autoState.so2Hold and "HOLD FULL" or "RUN",
             so3Stage=autoState.so3Hold and "HOLD FULL"
-                or autoState.so2InputHold and "HOLD SO2"
+                or autoState.so2InputHold and "HOLD SULFUR DIOXIDE"
                 or autoState.oxygenHold and "HOLD O2"
                 or "RUN",
             vaporStage="BUFFER ONLY",
             acidStage=autoState.acidHold and "HOLD FULL"
-                or autoState.so3InputHold and "HOLD SO3"
+                or autoState.so3InputHold and "HOLD SULFUR TRIOXIDE"
                 or autoState.vaporHold and "HOLD VAPOR"
                 or "RUN",
             machines=machines,
@@ -417,10 +417,10 @@ local function buildModuleStatus(data)
             inputResume=config.auto.inputResume,
         },
         details={
-            {label="SO2", value=type(data.so2.fill)=="number" and ("%.1f%%"):format(data.so2.fill*100) or "N/A"},
-            {label="SO3", value=type(data.so3.fill)=="number" and ("%.1f%%"):format(data.so3.fill*100) or "N/A"},
+            {label="SULFUR DIOXIDE", value=type(data.so2.fill)=="number" and ("%.1f%%"):format(data.so2.fill*100) or "N/A"},
+            {label="SULFUR TRIOXIDE", value=type(data.so3.fill)=="number" and ("%.1f%%"):format(data.so3.fill*100) or "N/A"},
             {label="WATER VAPOR", value=type(data.vapor.fill)=="number" and ("%.1f%%"):format(data.vapor.fill*100) or "N/A"},
-            {label="H2SO4", value=type(data.acid.fill)=="number" and ("%.1f%%"):format(data.acid.fill*100) or "N/A"},
+            {label="SULFURIC ACID", value=type(data.acid.fill)=="number" and ("%.1f%%"):format(data.acid.fill*100) or "N/A"},
             {label="O2 SOURCE", value=type(data.oxygen.fill)=="number" and ("%.1f%%"):format(data.oxygen.fill*100) or "N/A"},
         },
         alarms=health == "WARN" and {"SOURCE OR MACHINE WARNING"} or {},
