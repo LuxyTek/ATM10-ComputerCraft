@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.12.0"
+local PROGRAM_VERSION = "0.12.1"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
