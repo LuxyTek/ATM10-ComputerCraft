@@ -173,11 +173,18 @@ module.set_mode
 module.start_all
 module.stop_all
 chain.set_enabled
+chain.start
+chain.stop
 machine.start
 machine.stop
 ```
 
 Un module indique les actions qu'il supporte. Le Supervisor ne doit jamais inventer une commande non declaree.
+
+`chain.set_enabled` represente une autorisation persistante qui peut rester
+pertinente en AUTO (exemple : desactiver volontairement une chaine).
+`chain.start` / `chain.stop` representent au contraire une commande physique
+directe de chaine, normalement disponible uniquement en MANUAL.
 
 ## Regle de compatibilite
 
