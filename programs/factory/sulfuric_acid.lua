@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.2.0"
+local PROGRAM_VERSION = "0.2.1"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 local CONFIG_PATH = "/config/factory_sulfuric_acid.lua"
 
@@ -437,6 +437,12 @@ local function buildModuleStatus(data)
     table.insert(machines, data.so3Infuser)
     table.insert(machines, data.acidInfuser)
 
+    if type(config.waterVaporMachines) == "table" then
+        for _, name in ipairs(config.waterVaporMachines) do
+            table.insert(machines, readMachine(name, "WATER VAPOR"))
+        end
+    end
+
     return {
         contract=1,
         id=config.status.id,
@@ -624,6 +630,9 @@ local function controlLoop()
 
         elseif operatingMode == "MANUAL" and action == "all" then
             setAllMode(arg1)
+
+        elseif operatingMode == "MANUAL" and action == "machine" then
+            setMachineMode(arg1, arg2)
         end
 
         local ok, fresh = pcall(collectData)
