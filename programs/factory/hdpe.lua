@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.2.0"
+local PROGRAM_VERSION = "0.2.1"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 local CONFIG_PATH = "/config/factory_hdpe.lua"
 
@@ -450,6 +450,21 @@ local function buildModuleStatus(data)
         },
 
         ui={
+            machines={
+                {
+                    kind="PRC",
+                    name=config.prc,
+                    lineId="HDPE",
+                    state=data.prc.state,
+                    substrateCount=data.prc.substrateCount,
+                    liquidEtheneFill=data.prc.liquidEtheneFill,
+                    oxygenFill=data.prc.oxygenFill,
+                    energy=data.prc.energy,
+                    maxEnergy=data.prc.maxEnergy,
+                    energyUsage=data.prc.energyUsage,
+                },
+            },
+
             prcName=config.prc,
             prcState=data.prc.state,
 
@@ -597,7 +612,7 @@ end
 
 local function controlLoop()
     while true do
-        local _, action, targetMode = os.pullEvent("factory_hdpe_control")
+        local _, action, arg1, arg2 = os.pullEvent("factory_hdpe_control")
 
         if action == "toggle_mode" then
             operatingMode = operatingMode == "AUTO" and "MANUAL" or "AUTO"
@@ -612,7 +627,12 @@ local function controlLoop()
             end
 
         elseif operatingMode == "MANUAL" and action == "prc" then
-            setPrcMode(targetMode)
+            setPrcMode(arg1)
+
+        elseif operatingMode == "MANUAL"
+            and action == "machine"
+            and arg1 == config.prc then
+            setPrcMode(arg2)
         end
 
         local ok, fresh = pcall(collectData)
