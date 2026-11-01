@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.2.1"
+local PROGRAM_VERSION = "0.2.2"
 local STATUS_BUS_PATH = "/programs/factory/lib/status_bus.lua"
 local CONFIG_PATH = "/config/factory_hdpe.lua"
 
@@ -51,6 +51,13 @@ local function loadConfig()
 end
 
 local config = loadConfig()
+
+-- Migration from the previous dedicated Substrate barrel.
+-- Only rewrite the exact legacy mapping; custom mappings remain untouched.
+if config.substrateBarrel == "sophisticatedstorage:barrel_4" then
+    config.substrateBarrel = "sophisticatedstorage:barrel_5"
+end
+config.substrateItem = config.substrateItem or "mekanism:substrate"
 
 local operatingMode = "AUTO"
 local dataCache = nil
