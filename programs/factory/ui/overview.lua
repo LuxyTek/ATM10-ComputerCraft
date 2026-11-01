@@ -2,6 +2,15 @@ local widgets = dofile("/programs/factory/ui/widgets.lua")
 
 local M = {}
 
+local function supports(definition,action)
+    local actions=definition.actions or {}
+    if actions[action]==true then return true end
+    for _,value in ipairs(actions) do
+        if value==action then return true end
+    end
+    return false
+end
+
 local function resourceValue(status,id)
     local resource=type(status.resources)=="table" and status.resources[id] or nil
     if type(resource)=="table" then
@@ -104,10 +113,14 @@ function M.render(target,definition,status,options)
             w:writeAt(5,y,tostring(chain.label or chain.id),colors.white)
             w:writeAt(math.max(30,w.width-25),y,state,widgets.stateColor(state))
 
-            if chain.controllable and options.allowChainControls then
+            if chain.controllable
+                and options.allowChainControls
+                and supports(definition,"chain.set_enabled") then
                 local label=enabled and "[ OFF ]" or "[ ON ]"
                 local x=w.width-#label-1
                 bounds.chains[chain.id]=w:button(x,y,label,true,false)
+                bounds.chains[chain.id].action="chain.set_enabled"
+                bounds.chains[chain.id].chainId=chain.id
                 bounds.chains[chain.id].targetEnabled=not enabled
             end
 
