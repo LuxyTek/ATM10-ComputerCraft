@@ -39,7 +39,7 @@ la topologie automatique et l'adaptateur Contract V1 -> V2.
 
 ## LOT 3 - UI generique
 
-**Etat : code implemente, smoke test visuel en jeu restant a executer.**
+**Etat : valide en jeu sous CC:Tweaked.**
 
 Cree :
 
@@ -56,19 +56,35 @@ la topologie du Registry.
 Critere structurel atteint : une definition de test peut etre affichee sans
 ajouter de `renderXxx()`.
 
-Validation restante : verifier les trois vues sur un ecran CC:Tweaked.
+Validation effectuee : Overview, Machines et Flow Map ont ete testes sur
+Advanced Monitor. Le Flow Map derive et dessine les liens de ressources depuis
+la topologie du Registry.
 
 ## LOT 4 - Module pilote H2/O2
 
-Migrer H2/O2 en premier car il couvre :
+**Etat : couche V2 implementee, validation en jeu restante.**
 
-- plusieurs lignes ;
-- plusieurs machines ;
-- buffers ;
-- controles ;
-- ressources partagees.
+Cree :
 
-Critere : comportement identique a la baseline.
+- `modules/h2o2/definition.lua` ;
+- `modules/h2o2/legacy_adapter.lua` ;
+- `modules/h2o2/control_adapter.lua` ;
+- `modules/h2o2/config.example.lua` ;
+- `tools/h2o2_v2_smoke_test.lua`.
+
+La logique industrielle reste temporairement dans le runtime legacy
+`programs/factory/h2o2.lua`. Le module V2 lui ajoute des IDs logiques stables,
+un statut Contract V2 et une traduction des commandes V2 vers les events
+legacy.
+
+Cette etape permet de valider l'architecture V2 sans modifier le comportement
+AUTO, les seuils ou les securites H2/O2.
+
+Validation restante : verifier Overview + Machines generiques avec le fixture
+H2/O2, puis tester l'adaptation d'un statut H2/O2 reel avant de remplacer le
+runtime legacy.
+
+Critere final : comportement identique a la baseline.
 
 ## LOT 5 - Modules simples
 
