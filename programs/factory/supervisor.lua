@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.10.5"
+local PROGRAM_VERSION = "0.10.6"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -392,6 +392,71 @@ local function flowColor(module, now, fill, redAt, warnAt)
     return colors.lime
 end
 
+local function renderSulfuricFlowNode(now, module, x, y, nodeWidth)
+    local net = networkState(module, now)
+    local offline = net == "OFFLINE"
+    local runtime, runtimeColor = runtimeState(module, offline)
+    local mode = offline and "N/A" or tostring(module.mode or "N/A")
+    local state = offline and "N/A" or tostring(module.state or "N/A")
+    local health = offline and "N/A" or tostring(module.health or "N/A")
+    local ui = type(module.ui) == "table" and module.ui or {}
+
+    local right = x + nodeWidth - 1
+    local innerWidth = math.max(1, nodeWidth - 2)
+    local border = "+" .. string.rep("-", innerWidth) .. "+"
+
+    writeAt(x, y, border, colors.cyan)
+
+    for row = 1, 9 do
+        writeAt(x, y + row, "|", colors.cyan)
+        writeAt(right, y + row, "|", colors.cyan)
+    end
+
+    local title = " SULFURIC ACID "
+    local titleX = x + math.max(1, math.floor((nodeWidth - #title) / 2))
+    writeAt(titleX, y, title, colors.cyan, colors.black)
+
+    writeAt(x + 2, y + 1, "RUNTIME", colors.gray)
+    writeAt(x + 12, y + 1, runtime, runtimeColor)
+
+    writeAt(x + 2, y + 2, "MODE", colors.gray)
+    writeAt(x + 12, y + 2, mode, offline and colors.gray or modeColor(mode))
+
+    writeAt(x + 2, y + 3, "STATE", colors.gray)
+    writeAt(x + 12, y + 3, state, offline and colors.gray or stateColor(state))
+
+    writeAt(x + 2, y + 4, "HEALTH", colors.gray)
+    writeAt(x + 12, y + 4, health, offline and colors.gray or healthColor(health))
+
+    writeAt(x, y + 5, "+" .. string.rep("-", innerWidth) .. "+", colors.cyan)
+
+    local function resourceRow(row, label, fill)
+        local color = flowColor(module, now, fill, 0.10, 0.20)
+        writeAt(x + 2, y + row, label, color)
+        writeAt(
+            right - 5,
+            y + row,
+            flowPercent(fill),
+            color
+        )
+    end
+
+    resourceRow(6, "SULFUR DIOXIDE",  ui.sulfurDioxideFill)
+    resourceRow(7, "SULFUR TRIOXIDE", ui.sulfurTrioxideFill)
+    resourceRow(8, "WATER VAPOR",     ui.waterVaporFill)
+    resourceRow(9, "SULFURIC ACID",   ui.sulfuricAcidFill)
+
+    writeAt(x, y + 10, border, colors.cyan)
+
+    moduleBounds[#moduleBounds + 1] = {
+        x1=x,
+        x2=math.min(width, right),
+        y1=y,
+        y2=y + 10,
+        id=module.id,
+    }
+end
+
 local function topPortX(x, nodeWidth, side)
     -- Keep top-edge connectors away from the centered module title.
     -- Reserve two columns near each corner as connection zones.
@@ -452,8 +517,10 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfur
     -- The three columns are intentionally kept stable so future modules can
     -- extend the graph without turning the map into a cable diagram.
     local nodeWidth = 18
+    local sulfuricWidth = 28
     local leftX = 2
     local centerX = math.floor((width - nodeWidth) / 2) + 1
+    local sulfuricX = math.floor((width - sulfuricWidth) / 2) + 1
     local rightX = width - nodeWidth - 1
 
     local h2Y = 8
@@ -477,7 +544,13 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfur
         and height >= 35
 
     if sulfuricRendered then
-        renderFlowNode(now, sulfuric, centerX, sulfuricY, nodeWidth)
+        renderSulfuricFlowNode(
+            now,
+            sulfuric,
+            sulfuricX,
+            sulfuricY,
+            sulfuricWidth
+        )
     end
 
     local h2Fill =
@@ -650,8 +723,7 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfur
         )
 
         if sulfuricRendered then
-            local sulfuricUi = type(sulfuric.ui) == "table" and sulfuric.ui or {}
-            local sulfuricPortX = topPortX(centerX, nodeWidth, "left")
+            local sulfuricPortX = topPortX(sulfuricX, sulfuricWidth, "left")
 
             -- Explicit second consumer on the shared O2 bus.
             writeAt(sulfuricPortX, o2Y, "+", o2Color)
@@ -660,22 +732,7 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfur
             end
             writeAt(sulfuricPortX, sulfuricY - 1, "v", o2Color)
 
-            -- Official Sulfuric-module output resources. They sit in the
-            -- dedicated gap between SULFURIC ACID and ETHENE.
-            local function sulfuricOutput(y, label, fill)
-                local resourceColor = flowColor(sulfuric, now, fill, 0.10, 0.20)
-                writeAt(
-                    centerX,
-                    y,
-                    label .. " " .. flowPercent(fill) .. " ->",
-                    resourceColor
-                )
-            end
 
-            sulfuricOutput(sulfuricY + 7,  "SULFUR DIOXIDE",  sulfuricUi.sulfurDioxideFill)
-            sulfuricOutput(sulfuricY + 8,  "SULFUR TRIOXIDE", sulfuricUi.sulfurTrioxideFill)
-            sulfuricOutput(sulfuricY + 9,  "WATER VAPOR",     sulfuricUi.waterVaporFill)
-            sulfuricOutput(sulfuricY + 10, "SULFURIC ACID",   sulfuricUi.sulfuricAcidFill)
         end
     else
         local liquidEtheneFill =
