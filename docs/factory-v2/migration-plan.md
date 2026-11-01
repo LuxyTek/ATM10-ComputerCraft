@@ -16,7 +16,7 @@ Aucun comportement en jeu ne change.
 
 ## LOT 2 - Core minimal
 
-**Etat : code implemente, smoke test en jeu restant a executer.**
+**Etat : valide en jeu sous CC:Tweaked.**
 
 Cree :
 
@@ -34,19 +34,29 @@ temporairement les statuts Contract V1 via un adaptateur.
 Critere structurel atteint : aucun nom de module industriel n'est code dans
 les fichiers du Core.
 
-Validation runtime restante : executer le smoke test sous CC:Tweaked avant
-de brancher le Supervisor V2 sur ce socle.
+Validation runtime effectuee : le smoke test a confirme le loader, le Registry,
+la topologie automatique et l'adaptateur Contract V1 -> V2.
 
 ## LOT 3 - UI generique
 
-Extraire du Supervisor :
+**Etat : code implemente, smoke test visuel en jeu restant a executer.**
 
-- widgets ;
-- Overview generique ;
-- Machines generique ;
-- Flow Map.
+Cree :
 
-Critere : une definition de test peut etre affichee sans ajouter de `renderXxx()`.
+- `ui/widgets.lua` ;
+- `ui/overview.lua` ;
+- `ui/machines.lua` ;
+- `ui/flow_map.lua` ;
+- `tools/ui_v2_smoke_test.lua`.
+
+Aucun renderer V2 ne contient de nom de module industriel. Overview, Machines
+et Flow Map utilisent uniquement les definitions Contract V2, les statuts et
+la topologie du Registry.
+
+Critere structurel atteint : une definition de test peut etre affichee sans
+ajouter de `renderXxx()`.
+
+Validation restante : verifier les trois vues sur un ecran CC:Tweaked.
 
 ## LOT 4 - Module pilote H2/O2
 
