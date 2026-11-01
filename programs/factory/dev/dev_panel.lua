@@ -1,4 +1,4 @@
-local PANEL_VERSION="0.1.0"
+local PANEL_VERSION="0.2.0"
 local UPDATER_PATH="/programs/factory/dev/dev_updater.lua"
 local STARTUP_LAUNCHER="/startup_factory_v2_dev.lua"
 local STARTUP_PATH="/startup.lua"
@@ -106,6 +106,7 @@ local function render()
     writeAt(3,y,"H2/O2 LIVE",colors.cyan)
     button("h2liveoverview",18,y,"[ OVERVIEW ]",colors.black,colors.lime)
     button("h2livemachines",33,y,"[ MACHINES ]",colors.black,colors.lime)
+    button("h2control",48,y,"[ CONTROL ]",colors.black,colors.orange)
 
     y=y+4
     writeAt(3,y,"SYSTEME",colors.cyan)
@@ -148,6 +149,17 @@ local function runScreenTest(label,path,...)
     end
 
     waitForReturn()
+end
+
+local function runInteractive(path,...)
+    clear()
+    local ok=shell.run(path,...)
+    if not ok then
+        clear()
+        centered(math.max(2,math.floor(height/2)-1),"TEST INTERACTIF ECHEC",colors.red)
+        sleep(1)
+    end
+    render()
 end
 
 local function runCoreTest()
@@ -321,6 +333,12 @@ while true do
                 "machines",
                 "monitor",
                 "30"
+            )
+
+        elseif inside(buttons.h2control,x,y) then
+            runInteractive(
+                "/programs/factory/tools/h2o2_v2_control.lua",
+                "monitor"
             )
 
         elseif inside(buttons.restore,x,y) then
