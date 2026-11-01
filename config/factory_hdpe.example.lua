@@ -2,8 +2,8 @@ return {
     stopMode = "HIGH",
 
     prc = "pressurizedReactionChamber_4",
-    substrateBarrel = "sophisticatedstorage:barrel_4",
-    substrateCapacity = 8650752,
+    substrateBarrel = "sophisticatedstorage:barrel_5",
+    substrateItem = "mekanism:substrate",
     outputBarrel = "sophisticatedstorage:barrel_3",
     outputCapacity = 270336,
 
