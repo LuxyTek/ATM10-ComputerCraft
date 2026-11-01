@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.12.1"
+local PROGRAM_VERSION = "0.12.2"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -1660,22 +1660,44 @@ local function renderSulfuric(now, module)
     local mode=tostring(module.mode or "AUTO")
 
     if sulfuricPage=="machines" then
-        centered(5,"CONTROLE MACHINES",colors.cyan)
+        centered(5,"CONTROLE MACHINES PAR SOUS-MODULE",colors.cyan)
 
         local machines=type(ui.machines)=="table" and ui.machines or {}
-        local y=7
 
-        if #machines==0 then
-            centered(8,"AUCUNE MACHINE",colors.orange)
-        end
+        local groups={
+            {
+                title="SULFUR DIOXIDE",
+                match=function(machine)
+                    return tostring(machine.kind or "")=="OXIDIZER"
+                end,
+            },
+            {
+                title="SULFUR TRIOXIDE",
+                match=function(machine)
+                    return tostring(machine.kind or "")=="SO3 INFUSER"
+                end,
+            },
+            {
+                title="WATER VAPOR",
+                match=function(machine)
+                    return tostring(machine.kind or "")=="WATER VAPOR"
+                end,
+            },
+            {
+                title="SULFURIC ACID",
+                match=function(machine)
+                    return tostring(machine.kind or "")=="H2SO4 INFUSER"
+                end,
+            },
+        }
 
-        for _,machine in ipairs(machines) do
+        local function drawMachine(machine,y)
             local state=tostring(machine.state or "?")
             local kind=tostring(machine.kind or "MACHINE")
 
-            writeAt(3,y,kind,colors.cyan)
-            writeAt(18,y,shortName(machine.name,math.max(14,width-48)),colors.white)
-            writeAt(math.max(42,width-18),y,state,stateColor(state))
+            writeAt(5,y,kind,colors.lightBlue)
+            writeAt(21,y,shortName(machine.name,math.max(14,width-52)),colors.white)
+            writeAt(math.max(46,width-18),y,state,stateColor(state))
 
             if mode=="AUTO" then
                 writeAt(width-9,y,"[ AUTO ]",colors.lightGray,colors.gray)
@@ -1702,10 +1724,36 @@ local function renderSulfuric(now, module)
                     compact(machine.maxEnergy," FE")
                 )
             end
-            writeAt(18,y+1,energyText,colors.gray)
-            writeAt(18,y+2,"USAGE "..compact(machine.energyUsage," FE/t"),colors.gray)
 
-            y=y+4
+            writeAt(
+                21,
+                y+1,
+                energyText.." | USAGE "..compact(machine.energyUsage," FE/t"),
+                colors.gray
+            )
+        end
+
+        local y=7
+
+        for _,group in ipairs(groups) do
+            writeAt(3,y,"[ "..group.title.." ]",colors.cyan)
+            y=y+1
+
+            local found=false
+            for _,machine in ipairs(machines) do
+                if group.match(machine) then
+                    found=true
+                    drawMachine(machine,y)
+                    y=y+2
+                end
+            end
+
+            if not found then
+                writeAt(5,y,"AUCUNE MACHINE MAPPEE",colors.gray)
+                y=y+1
+            end
+
+            y=y+1
         end
 
         if mode=="AUTO" then
