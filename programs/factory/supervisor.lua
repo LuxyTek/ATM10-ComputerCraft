@@ -1,4 +1,4 @@
-local PROGRAM_VERSION = "0.10.6"
+local PROGRAM_VERSION = "0.10.7"
 local STATUS_PROTOCOL = "factory.status.v1"
 local CONFIG_PATH = "/config/factory_supervisor.lua"
 local UPDATER_PATH = "/programs/factory/lib/updater.lua"
@@ -567,8 +567,12 @@ local function renderConnectedMap(now, list, h2o2, biofuel, ethene, hdpe, sulfur
     local leftOutX = leftX + nodeWidth
     local etheneInX = centerX - 1
 
-    -- H2/O2 -> ETHENE : H2 has its own route and its own visible label.
-    local h2JoinX = centerX - 3
+    -- H2/O2 -> ETHENE : keep the vertical H2 trunk completely
+    -- outside the wider Sulfuric Acid node, then join ETHENE below it.
+    local h2JoinX =
+        sulfuricRendered
+        and math.max(leftOutX + 2, sulfuricX - 2)
+        or centerX - 3
     local h2SourceY = h2Y + 3
     local h2TargetY = etheneY + 2
 
