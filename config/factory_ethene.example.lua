@@ -6,8 +6,8 @@ return {
     etheneTank = "ultimateMaxChemicalTank_2",
     condensentrator = "rotaryCondensentrator_0",
     liquidEtheneTank = "ultimateFluidTank_7",
-    substrateBarrel = "sophisticatedstorage:barrel_4",
-    substrateCapacity = 8650752,
+    substrateBarrel = "sophisticatedstorage:barrel_5",
+    substrateItem = "mekanism:substrate",
 
     lines = {
         {
